@@ -1,0 +1,11 @@
+# 前端
+node_modules/
+dist/
+
+# Rust
+src-tauri/target/
+src-tauri/gen/
+
+# 系统
+Thumbs.db
+.DS_Store
