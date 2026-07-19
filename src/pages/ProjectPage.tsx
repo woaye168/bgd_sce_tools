@@ -46,8 +46,12 @@ export default function ProjectPage({ onProjectChanged }: ProjectPageProps) {
   };
 
   const initProject = async () => {
-    const selected = await open({ directory: true, title: "选择要初始化的项目文件夹" });
-    if (typeof selected !== "string") return;
+    // 直接对当前项目初始化，不再弹目录选择
+    if (!current) {
+      setMessage("✘ 请先选择项目文件夹");
+      return;
+    }
+    const selected = current;
 
     const doInit = async (force: boolean) => {
       setBusy(true);
@@ -139,7 +143,7 @@ export default function ProjectPage({ onProjectChanged }: ProjectPageProps) {
         </button>
         {info?.initialized === true && (
           <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-            当前项目已初始化（存在 init.lock），如需重新初始化请先切换到其他项目或未初始化的目录
+            当前项目已初始化，如需重新初始化删除 init.lock
           </p>
         )}
         {message && (

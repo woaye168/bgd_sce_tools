@@ -59,6 +59,11 @@ export default function SettingsPage() {
     }
   };
 
+  /** 版本号归一化（去 v 前缀后比较） */
+  const sameVersion = (a?: string | null, b?: string | null) =>
+    (a ?? "").replace(/^v/, "") !== "" &&
+    (a ?? "").replace(/^v/, "") === (b ?? "").replace(/^v/, "");
+
   const doUpdate = async () => {
     setBusy(true);
     setReport(null);
@@ -138,7 +143,7 @@ export default function SettingsPage() {
         <>
       <Card title="框架设置">
         <div className="space-y-3">
-          {textField("框架仓库", "framework_repo", "如 yourname/bgd-framework")}
+          {textField("框架仓库", "framework_repo", "如 woaye168/bgd_sce_framework")}
           <div className="flex flex-wrap items-center gap-3">
             <button
               onClick={checkUpdate}
@@ -152,7 +157,7 @@ export default function SettingsPage() {
                 当前: {updateInfo.current || "未知"} / 最新: {updateInfo.latest ?? "无 release"}
               </span>
             )}
-            {updateInfo?.latest && updateInfo.latest !== updateInfo.current && (
+            {updateInfo?.latest && !sameVersion(updateInfo.latest, updateInfo.current) && (
               <button
                 onClick={doUpdate}
                 disabled={busy}
@@ -193,9 +198,9 @@ export default function SettingsPage() {
           {textField("框架客户端产物", "libs_client_target")}
           {textField("游戏服务端产物", "game_server_target")}
           {textField("游戏客户端产物", "game_client_target")}
-          {textField("资源输出目录", "asset_target")}
           {textField("服务端入口", "server_entrance")}
           {textField("客户端入口", "client_entrance")}
+          {textField("资源输出目录", "asset_target")}
         </div>
         <button
           onClick={save}

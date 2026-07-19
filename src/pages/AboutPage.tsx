@@ -3,7 +3,7 @@ import { check } from "@tauri-apps/plugin-updater";
 import { api } from "../lib/api";
 import Card from "../components/Card";
 
-const APP_VERSION = "0.2.1";
+const APP_VERSION = "0.2.2";
 
 /** 关于页：版本信息 + 检查更新（自动更新） */
 export default function AboutPage() {
