@@ -75,19 +75,22 @@ export default function SettingsPage() {
     label: string,
     key: keyof BgdConfig,
     hint?: string
-  ) => (
-    <label className="block">
-      <span className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">
-        {label}
-        {hint && <span className="ml-2 text-slate-400">{hint}</span>}
-      </span>
-      <input
-        value={String(config[key] ?? "")}
-        onChange={(e) => set(key, e.target.value)}
-        className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm text-slate-700 dark:border-slate-600 dark:text-slate-200"
-      />
-    </label>
-  );
+  ) => {
+    if (!config) return null;
+    return (
+      <label className="block">
+        <span className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">
+          {label}
+          {hint && <span className="ml-2 text-slate-400">{hint}</span>}
+        </span>
+        <input
+          value={String(config[key] ?? "")}
+          onChange={(e) => set(key, e.target.value)}
+          className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm text-slate-700 dark:border-slate-600 dark:text-slate-200"
+        />
+      </label>
+    );
+  };
 
   return (
     <div className="space-y-5">
