@@ -9,6 +9,32 @@ use std::path::{Path, PathBuf};
 
 const DEFAULT_FRAMEWORK_REPO: &str = "woaye168/bgd_sce_framework";
 
+// ---------------------------------------------------------------- 应用设置
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct AppSettings {
+    /// HTTP 代理地址，如 http://127.0.0.1:7897；留空表示直连
+    #[serde(default)]
+    pub proxy: String,
+}
+
+pub fn load_settings(app_data_dir: &Path) -> AppSettings {
+    let path = app_data_dir.join("settings.json");
+    fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default()
+}
+
+pub fn save_settings(app_data_dir: &Path, settings: &AppSettings) -> Result<()> {
+    let path = app_data_dir.join("settings.json");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, serde_json::to_string_pretty(settings)?)?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------- 最近项目
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -43,11 +69,13 @@ pub fn add_recent(app_data_dir: &Path, project: &str) -> Result<Vec<String>> {
 
 // ---------------------------------------------------------------- GitHub 下载
 
-fn http_client() -> Result<reqwest::blocking::Client> {
-    reqwest::blocking::Client::builder()
-        .user_agent("BGD_SCE_TOOLS")
-        .build()
-        .context("无法创建 HTTP 客户端")
+fn http_client(proxy: &str) -> Result<reqwest::blocking::Client> {
+    let mut builder = reqwest::blocking::Client::builder().user_agent("BGD_SCE_TOOLS");
+    let proxy = proxy.trim();
+    if !proxy.is_empty() {
+        builder = builder.proxy(reqwest::Proxy::all(proxy).context("代理地址无效")?);
+    }
+    builder.build().context("无法创建 HTTP 客户端")
 }
 
 fn codeload_url(repo: &str) -> String {
@@ -55,10 +83,10 @@ fn codeload_url(repo: &str) -> String {
 }
 
 /// 下载框架仓库 zip 并解压到临时目录，返回 <解压根>/template 路径
-fn download_framework_template(repo: &str) -> Result<PathBuf> {
+fn download_framework_template(repo: &str, proxy: &str) -> Result<PathBuf> {
     let repo = if repo.is_empty() { DEFAULT_FRAMEWORK_REPO } else { repo };
     let url = codeload_url(repo);
-    let resp = http_client()?
+    let resp = http_client(proxy)?
         .get(&url)
         .send()
         .with_context(|| format!("框架下载失败: {url}"))?;
@@ -89,10 +117,10 @@ fn download_framework_template(repo: &str) -> Result<PathBuf> {
 }
 
 /// 查询框架最新版本（最新 release 的 tag_name；无 release 时返回 None）
-pub fn latest_framework_version(repo: &str) -> Result<Option<String>> {
+pub fn latest_framework_version(repo: &str, proxy: &str) -> Result<Option<String>> {
     let repo = if repo.is_empty() { DEFAULT_FRAMEWORK_REPO } else { repo };
     let url = format!("https://api.github.com/repos/{repo}/releases/latest");
-    let resp = http_client()?.get(&url).send()?;
+    let resp = http_client(proxy)?.get(&url).send()?;
     if resp.status() == reqwest::StatusCode::NOT_FOUND {
         return Ok(None);
     }
@@ -123,9 +151,9 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<()> {
 
 /// 初始化项目：下载框架 -> 生成 .bgd/、.emmyrc.json、.gitignore
 /// 若 .bgd 已存在则备份为 .bgd.bak-<时间戳>
-pub fn init_project(project_root: &Path, repo: &str, log: &dyn Fn(&str)) -> Result<String> {
+pub fn init_project(project_root: &Path, repo: &str, proxy: &str, log: &dyn Fn(&str)) -> Result<String> {
     log("开始下载框架...");
-    let template = download_framework_template(repo)?;
+    let template = download_framework_template(repo, proxy)?;
     let tpl_bgd = template.join(".bgd");
     if !tpl_bgd.is_dir() {
         return Err(anyhow!("框架模板缺少 template/.bgd 目录"));
@@ -166,7 +194,7 @@ pub fn init_project(project_root: &Path, repo: &str, log: &dyn Fn(&str)) -> Resu
         } else {
             repo.to_string()
         };
-        if let Ok(Some(ver)) = latest_framework_version(repo) {
+        if let Ok(Some(ver)) = latest_framework_version(repo, proxy) {
             cfg.framework_version = ver;
         }
         cfg.save(&dest_bgd)?;
@@ -176,13 +204,13 @@ pub fn init_project(project_root: &Path, repo: &str, log: &dyn Fn(&str)) -> Resu
 }
 
 /// 更新框架：只覆盖 .bgd/libs 与 .emmyrc.json，不动 src；更新 framework_version
-pub fn update_framework(project_root: &Path, repo: &str, log: &dyn Fn(&str)) -> Result<String> {
+pub fn update_framework(project_root: &Path, repo: &str, proxy: &str, log: &dyn Fn(&str)) -> Result<String> {
     let dest_bgd = project_root.join(".bgd");
     if !dest_bgd.is_dir() {
         return Err(anyhow!("项目尚未初始化（缺少 .bgd 目录）"));
     }
     log("开始下载最新框架...");
-    let template = download_framework_template(repo)?;
+    let template = download_framework_template(repo, proxy)?;
 
     let src_libs = template.join(".bgd").join("libs");
     let dest_libs = dest_bgd.join("libs");
@@ -210,7 +238,7 @@ pub fn update_framework(project_root: &Path, repo: &str, log: &dyn Fn(&str)) -> 
     }
 
     let mut cfg = BgdConfig::load(&dest_bgd)?;
-    if let Ok(Some(ver)) = latest_framework_version(repo) {
+    if let Ok(Some(ver)) = latest_framework_version(repo, proxy) {
         cfg.framework_version = ver.clone();
         cfg.save(&dest_bgd)?;
         Ok(format!("框架已更新到 {ver}"))

@@ -2,6 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  AppSettings,
   BgdConfig,
   FrameworkUpdateInfo,
   LogEvent,
@@ -31,6 +32,10 @@ export const api = {
   checkFrameworkUpdate: () =>
     invoke<FrameworkUpdateInfo>("check_framework_update"),
   updateFramework: () => invoke<string>("update_framework"),
+
+  getAppSettings: () => invoke<AppSettings>("get_app_settings"),
+  saveAppSettings: (settings: AppSettings) =>
+    invoke<void>("save_app_settings", { settings }),
 };
 
 /** 订阅后端日志事件（build / watch 共用通道） */

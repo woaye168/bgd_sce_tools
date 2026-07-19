@@ -38,3 +38,9 @@ export interface FrameworkUpdateInfo {
 }
 
 export type PageKey = "project" | "build" | "watch" | "settings" | "about";
+
+/** 应用级设置（与项目无关，存于应用配置目录 settings.json） */
+export interface AppSettings {
+  /** HTTP 代理地址，如 http://127.0.0.1:7897；留空表示直连 */
+  proxy: string;
+}

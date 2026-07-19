@@ -69,6 +69,28 @@ fn get_recent_projects(app: AppHandle) -> Vec<String> {
         .unwrap_or_default()
 }
 
+// ---------------------------------------------------------------- 应用设置
+
+fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path().app_config_dir().map_err(|e| e.to_string())
+}
+
+fn load_proxy(app: &AppHandle) -> String {
+    app_data_dir(app)
+        .map(|d| project::load_settings(&d).proxy)
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+fn get_app_settings(app: AppHandle) -> Result<project::AppSettings, String> {
+    Ok(project::load_settings(&app_data_dir(&app)?))
+}
+
+#[tauri::command]
+fn save_app_settings(app: AppHandle, settings: project::AppSettings) -> Result<(), String> {
+    project::save_settings(&app_data_dir(&app)?, &settings).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn get_project_info(state: State<AppState>) -> Result<serde_json::Value, String> {
     let bgd_root = state.bgd_root()?;
@@ -164,17 +186,19 @@ fn is_watching(state: State<AppState>) -> bool {
 fn init_project(app: AppHandle, state: State<AppState>, path: String, repo: String) -> Result<String, String> {
     let root = PathBuf::from(&path);
     let log = |line: &str| emit_log(&app, "build", line);
-    let msg = project::init_project(&root, &repo, &log).map_err(|e| e.to_string())?;
+    let proxy = load_proxy(&app);
+    let msg = project::init_project(&root, &repo, &proxy, &log).map_err(|e| e.to_string())?;
     // 初始化完成后自动设为当前项目
     *state.project.lock().map_err(|e| e.to_string())? = Some(root);
     Ok(msg)
 }
 
 #[tauri::command]
-fn check_framework_update(state: State<AppState>) -> Result<serde_json::Value, String> {
+fn check_framework_update(app: AppHandle, state: State<AppState>) -> Result<serde_json::Value, String> {
     let bgd_root = state.bgd_root()?;
     let cfg = load_cfg(&bgd_root)?;
-    let latest = project::latest_framework_version(&cfg.framework_repo).map_err(|e| e.to_string())?;
+    let proxy = load_proxy(&app);
+    let latest = project::latest_framework_version(&cfg.framework_repo, &proxy).map_err(|e| e.to_string())?;
     Ok(serde_json::json!({
         "current": cfg.framework_version,
         "latest": latest,
@@ -186,8 +210,9 @@ fn update_framework(app: AppHandle, state: State<AppState>) -> Result<String, St
     let bgd_root = state.bgd_root()?;
     let cfg = load_cfg(&bgd_root)?;
     let log = |line: &str| emit_log(&app, "build", line);
+    let proxy = load_proxy(&app);
     let project_root = bgd_root.parent().ok_or("无法确定项目根目录")?.to_path_buf();
-    project::update_framework(&project_root, &cfg.framework_repo, &log).map_err(|e| e.to_string())
+    project::update_framework(&project_root, &cfg.framework_repo, &proxy, &log).map_err(|e| e.to_string())
 }
 
 // ---------------------------------------------------------------- 入口
@@ -217,6 +242,8 @@ pub fn run() {
             init_project,
             check_framework_update,
             update_framework,
+            get_app_settings,
+            save_app_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running BGD_SCE_TOOLS");

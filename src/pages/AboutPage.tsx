@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { check } from "@tauri-apps/plugin-updater";
+import { api } from "../lib/api";
 import Card from "../components/Card";
 
-const APP_VERSION = "0.1.2";
+const APP_VERSION = "0.1.3";
 
 /** 关于页：版本信息 + 检查更新（自动更新） */
 export default function AboutPage() {
@@ -13,7 +14,10 @@ export default function AboutPage() {
     setBusy(true);
     setMessage("正在检查更新...");
     try {
-      const update = await check();
+      // 读取代理设置（留空则直连）
+      const settings = await api.getAppSettings().catch(() => ({ proxy: "" }));
+      const proxy = settings.proxy?.trim();
+      const update = await check(proxy ? { proxy } : undefined);
       if (update) {
         setMessage(`发现新版本 ${update.version}，正在下载安装...`);
         await update.downloadAndInstall();

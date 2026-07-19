@@ -1,18 +1,33 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
-import type { BgdConfig, FrameworkUpdateInfo } from "../lib/types";
+import type { AppSettings, BgdConfig, FrameworkUpdateInfo } from "../lib/types";
 import Card from "../components/Card";
 
-/** 设置页：项目配置（bgd.json 表单）、框架更新 */
+/** 设置页：通用设置（代理）、项目配置（bgd.json 表单）、框架更新 */
 export default function SettingsPage() {
   const [config, setConfig] = useState<BgdConfig | null>(null);
+  const [appSettings, setAppSettings] = useState<AppSettings>({ proxy: "" });
   const [updateInfo, setUpdateInfo] = useState<FrameworkUpdateInfo | null>(null);
   const [message, setMessage] = useState("");
+  const [settingsMsg, setSettingsMsg] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     api.getConfig().then(setConfig).catch(() => setConfig(null));
+    api.getAppSettings().then(setAppSettings).catch(() => {});
   }, []);
+
+  const saveAppSettings = async () => {
+    setBusy(true);
+    try {
+      await api.saveAppSettings(appSettings);
+      setSettingsMsg("✔ 已保存（对检查更新、框架下载生效）");
+    } catch (e) {
+      setSettingsMsg(`✘ 保存失败: ${String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const set = (key: keyof BgdConfig, value: string | boolean | string[]) => {
     setConfig((prev) => (prev ? { ...prev, [key]: value } : prev));
@@ -56,16 +71,6 @@ export default function SettingsPage() {
     }
   };
 
-  if (!config) {
-    return (
-      <Card title="设置">
-        <p className="text-sm text-slate-500 dark:text-slate-400">
-          请先在「项目」页选择一个已初始化的项目
-        </p>
-      </Card>
-    );
-  }
-
   const textField = (
     label: string,
     key: keyof BgdConfig,
@@ -86,6 +91,43 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-5">
+      <Card title="通用设置">
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">
+            网络代理
+            <span className="ml-2 text-slate-400">
+              如 http://127.0.0.1:7897，留空表示直连（对检查更新、框架下载生效）
+            </span>
+          </span>
+          <input
+            value={appSettings.proxy}
+            onChange={(e) => setAppSettings({ proxy: e.target.value })}
+            placeholder="http://127.0.0.1:7897"
+            className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm text-slate-700 dark:border-slate-600 dark:text-slate-200"
+          />
+        </label>
+        <button
+          onClick={saveAppSettings}
+          disabled={busy}
+          className="mt-3 rounded-lg bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-500 disabled:opacity-50"
+        >
+          保存
+        </button>
+        {settingsMsg && (
+          <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{settingsMsg}</p>
+        )}
+      </Card>
+
+      {!config && (
+        <Card title="项目配置">
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            请先在「项目」页选择一个已初始化的项目
+          </p>
+        </Card>
+      )}
+
+      {config && (
+        <>
       <Card title="框架设置">
         <div className="space-y-3">
           {textField("框架仓库", "framework_repo", "如 yourname/bgd-framework")}
@@ -139,6 +181,8 @@ export default function SettingsPage() {
           <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{message}</p>
         )}
       </Card>
+        </>
+      )}
     </div>
   );
 }
