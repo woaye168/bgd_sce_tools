@@ -1,6 +1,6 @@
 [package]
 name = "bgd_sce_tools"
-version = "0.1.1"
+version = "0.1.2"
 description = "BGD SCE 框架构建工具"
 edition = "2021"
 rust-version = "1.77"
@@ -22,7 +22,7 @@ regex = "1"
 walkdir = "2"
 notify = "8"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json"] }
-zip = { version = "2", default-features = false }
+zip = { version = "2", default-features = false, features = ["deflate"] }
 anyhow = "1"
 
 [profile.release]
