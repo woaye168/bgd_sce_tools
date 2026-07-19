@@ -176,7 +176,15 @@ fn copy_file(src: &Path, dest: &Path) -> Result<()> {
 
 fn sha256_file(path: &Path) -> Result<String> {
     let bytes = fs::read(path)?;
-    Ok(format!("{:x}", Sha256::digest(&bytes)))
+    // 文本文件统一换行符为 LF 后哈希（避免 CRLF/LF 差异导致误报更新/冲突）
+    let normalized = if bytes.contains(&0) {
+        bytes
+    } else {
+        String::from_utf8_lossy(&bytes)
+            .replace("\r\n", "\n")
+            .into_bytes()
+    };
+    Ok(format!("{:x}", Sha256::digest(&normalized)))
 }
 
 /// 计算 libs 目录下所有文件的 SHA256（键为 "{prefix}/<相对路径>"，正斜杠）
