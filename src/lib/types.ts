@@ -44,3 +44,14 @@ export interface AppSettings {
   /** HTTP 代理地址，如 http://127.0.0.1:7897；留空表示直连 */
   proxy: string;
 }
+
+/** 框架增量更新报告 */
+export interface UpdateReport {
+  updated: number;
+  added: number;
+  removed: number;
+  kept_local: number;
+  conflicts: string[];
+  notes: string[];
+  version: string;
+}

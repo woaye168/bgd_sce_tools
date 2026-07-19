@@ -7,6 +7,7 @@ import type {
   FrameworkUpdateInfo,
   LogEvent,
   ProjectInfo,
+  UpdateReport,
 } from "./types";
 
 export const api = {
@@ -27,11 +28,11 @@ export const api = {
   stopWatch: () => invoke<void>("stop_watch"),
   isWatching: () => invoke<boolean>("is_watching"),
 
-  initProject: (path: string, repo: string) =>
-    invoke<string>("init_project", { path, repo }),
+  initProject: (path: string, repo: string, force: boolean) =>
+    invoke<string>("init_project", { path, repo, force }),
   checkFrameworkUpdate: () =>
     invoke<FrameworkUpdateInfo>("check_framework_update"),
-  updateFramework: () => invoke<string>("update_framework"),
+  updateFramework: () => invoke<UpdateReport>("update_framework"),
 
   getAppSettings: () => invoke<AppSettings>("get_app_settings"),
   saveAppSettings: (settings: AppSettings) =>

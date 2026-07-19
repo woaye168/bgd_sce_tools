@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
-import type { AppSettings, BgdConfig, FrameworkUpdateInfo } from "../lib/types";
+import type { AppSettings, BgdConfig, FrameworkUpdateInfo, UpdateReport } from "../lib/types";
 import Card from "../components/Card";
 
 /** 设置页：通用设置（代理）、项目配置（bgd.json 表单）、框架更新 */
@@ -8,6 +8,7 @@ export default function SettingsPage() {
   const [config, setConfig] = useState<BgdConfig | null>(null);
   const [appSettings, setAppSettings] = useState<AppSettings>({ proxy: "" });
   const [updateInfo, setUpdateInfo] = useState<FrameworkUpdateInfo | null>(null);
+  const [report, setReport] = useState<UpdateReport | null>(null);
   const [message, setMessage] = useState("");
   const [settingsMsg, setSettingsMsg] = useState("");
   const [busy, setBusy] = useState(false);
@@ -60,9 +61,13 @@ export default function SettingsPage() {
 
   const doUpdate = async () => {
     setBusy(true);
+    setReport(null);
     try {
-      const msg = await api.updateFramework();
-      setMessage(`✔ ${msg}`);
+      const rep = await api.updateFramework();
+      setReport(rep);
+      setMessage(
+        `✔ 框架已更新到 ${rep.version || "最新"}：更新 ${rep.updated}，新增 ${rep.added}，删除 ${rep.removed}，保留本地 ${rep.kept_local}，冲突 ${rep.conflicts.length}`
+      );
       setUpdateInfo(null);
     } catch (e) {
       setMessage(`✘ 更新失败: ${String(e)}`);
@@ -157,6 +162,26 @@ export default function SettingsPage() {
               </button>
             )}
           </div>
+
+          {report && report.conflicts.length > 0 && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-950">
+              <p className="mb-2 text-sm font-medium text-amber-800 dark:text-amber-300">
+                {report.conflicts.length} 个冲突文件（本地已保留，上游新版另存为 .framework-new，请手动合并）
+              </p>
+              <ul className="space-y-1 font-mono text-xs text-amber-700 dark:text-amber-400">
+                {report.conflicts.map((p) => (
+                  <li key={p}>{p}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {report && report.notes.length > 0 && (
+            <ul className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+              {report.notes.map((n, i) => (
+                <li key={i}>{n}</li>
+              ))}
+            </ul>
+          )}
         </div>
       </Card>
 

@@ -183,11 +183,11 @@ fn is_watching(state: State<AppState>) -> bool {
 // ---------------------------------------------------------------- 初始化 / 框架更新
 
 #[tauri::command]
-fn init_project(app: AppHandle, state: State<AppState>, path: String, repo: String) -> Result<String, String> {
+fn init_project(app: AppHandle, state: State<AppState>, path: String, repo: String, force: bool) -> Result<String, String> {
     let root = PathBuf::from(&path);
     let log = |line: &str| emit_log(&app, "build", line);
     let proxy = load_proxy(&app);
-    let msg = project::init_project(&root, &repo, &proxy, &log).map_err(|e| e.to_string())?;
+    let msg = project::init_project(&root, &repo, &proxy, force, &log).map_err(|e| e.to_string())?;
     // 初始化完成后自动设为当前项目
     *state.project.lock().map_err(|e| e.to_string())? = Some(root);
     Ok(msg)
@@ -206,7 +206,7 @@ fn check_framework_update(app: AppHandle, state: State<AppState>) -> Result<serd
 }
 
 #[tauri::command]
-fn update_framework(app: AppHandle, state: State<AppState>) -> Result<String, String> {
+fn update_framework(app: AppHandle, state: State<AppState>) -> Result<project::UpdateReport, String> {
     let bgd_root = state.bgd_root()?;
     let cfg = load_cfg(&bgd_root)?;
     let log = |line: &str| emit_log(&app, "build", line);

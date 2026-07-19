@@ -49,18 +49,36 @@ export default function ProjectPage({ onProjectChanged }: ProjectPageProps) {
   const initProject = async () => {
     const selected = await open({ directory: true, title: "选择要初始化的项目文件夹" });
     if (typeof selected !== "string") return;
-    setBusy(true);
-    setMessage("正在初始化（下载框架中，请稍候）...");
-    try {
-      const msg = await api.initProject(selected, repo.trim());
-      setMessage(`✔ ${msg}`);
-      await refresh();
-      onProjectChanged();
-    } catch (e) {
-      setMessage(`✘ 初始化失败: ${String(e)}`);
-    } finally {
-      setBusy(false);
-    }
+
+    const doInit = async (force: boolean) => {
+      setBusy(true);
+      setMessage("正在初始化（下载框架中，请稍候）...");
+      try {
+        const msg = await api.initProject(selected, repo.trim(), force);
+        setMessage(`✔ ${msg}`);
+        await refresh();
+        onProjectChanged();
+      } catch (e) {
+        const errText = String(e);
+        // 初始化锁：确认后强制解锁重试
+        if (!force && errText.includes("已初始化")) {
+          const ok = window.confirm(
+            "该项目已初始化（存在 init.lock）。\n\n重新初始化将覆盖 .bgd 目录（旧目录会自动备份为 .bgd.bak-时间戳）。\n\n是否继续？"
+          );
+          if (ok) {
+            await doInit(true);
+            return;
+          }
+          setMessage("已取消初始化");
+        } else {
+          setMessage(`✘ 初始化失败: ${errText}`);
+        }
+      } finally {
+        setBusy(false);
+      }
+    };
+
+    await doInit(false);
   };
 
   return (
