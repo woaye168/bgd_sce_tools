@@ -16,7 +16,6 @@ export interface BgdConfig {
   game_server_target: string;
   game_client_target: string;
   game_excludes: string[];
-  templates_dir: string;
   framework_version: string;
   framework_repo: string;
 }
@@ -43,6 +42,8 @@ export type PageKey = "project" | "build" | "watch" | "settings" | "about";
 export interface AppSettings {
   /** HTTP 代理地址，如 http://127.0.0.1:7897；留空表示直连 */
   proxy: string;
+  /** 监听开关状态（持久化，启动时自动恢复） */
+  watch_enabled: boolean;
 }
 
 /** 框架增量更新报告 */

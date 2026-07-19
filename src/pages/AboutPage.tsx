@@ -3,7 +3,7 @@ import { check } from "@tauri-apps/plugin-updater";
 import { api } from "../lib/api";
 import Card from "../components/Card";
 
-const APP_VERSION = "0.2.0";
+const APP_VERSION = "0.2.1";
 
 /** 关于页：版本信息 + 检查更新（自动更新） */
 export default function AboutPage() {
@@ -15,7 +15,9 @@ export default function AboutPage() {
     setMessage("正在检查更新...");
     try {
       // 读取代理设置（留空则直连）
-      const settings = await api.getAppSettings().catch(() => ({ proxy: "" }));
+      const settings = await api
+        .getAppSettings()
+        .catch(() => ({ proxy: "", watch_enabled: false }));
       const proxy = settings.proxy?.trim();
       const update = await check(proxy ? { proxy } : undefined);
       if (update) {

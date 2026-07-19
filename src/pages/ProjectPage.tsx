@@ -13,7 +13,6 @@ export default function ProjectPage({ onProjectChanged }: ProjectPageProps) {
   const [current, setCurrent] = useState<string | null>(null);
   const [recent, setRecent] = useState<string[]>([]);
   const [info, setInfo] = useState<ProjectInfo | null>(null);
-  const [repo, setRepo] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -54,7 +53,7 @@ export default function ProjectPage({ onProjectChanged }: ProjectPageProps) {
       setBusy(true);
       setMessage("正在初始化（下载框架中，请稍候）...");
       try {
-        const msg = await api.initProject(selected, repo.trim(), force);
+        const msg = await api.initProject(selected, "", force);
         setMessage(`✔ ${msg}`);
         await refresh();
         onProjectChanged();
@@ -131,19 +130,18 @@ export default function ProjectPage({ onProjectChanged }: ProjectPageProps) {
         <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">
           从框架仓库下载最新框架，生成 .bgd 目录、.emmyrc.json、.gitignore。
         </p>
-        <input
-          value={repo}
-          onChange={(e) => setRepo(e.target.value)}
-          placeholder="框架仓库（如 yourname/bgd-framework，留空用默认）"
-          className="mb-3 w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm text-slate-700 dark:border-slate-600 dark:text-slate-200"
-        />
         <button
           onClick={initProject}
-          disabled={busy}
+          disabled={busy || info?.initialized === true}
           className="rounded-lg bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-500 disabled:opacity-50"
         >
           {busy ? "初始化中..." : "初始化项目"}
         </button>
+        {info?.initialized === true && (
+          <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+            当前项目已初始化（存在 init.lock），如需重新初始化请先切换到其他项目或未初始化的目录
+          </p>
+        )}
         {message && (
           <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{message}</p>
         )}

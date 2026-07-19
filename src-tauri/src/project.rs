@@ -18,6 +18,9 @@ pub struct AppSettings {
     /// HTTP 代理地址，如 http://127.0.0.1:7897；留空表示直连
     #[serde(default)]
     pub proxy: String,
+    /// 监听开关状态（持久化，启动时自动恢复）
+    #[serde(default)]
+    pub watch_enabled: bool,
 }
 
 pub fn load_settings(app_data_dir: &Path) -> AppSettings {

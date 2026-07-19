@@ -41,15 +41,54 @@ fn load_cfg(bgd_root: &Path) -> Result<BgdConfig, String> {
 
 // ---------------------------------------------------------------- 项目命令
 
+/// 启动监听（内部复用）：当前项目已初始化才启动；已在监听则先停
+fn try_start_watch(app: &AppHandle, state: &AppState) -> Result<(), String> {
+    // 已初始化才允许监听
+    let bgd_root = state.bgd_root()?;
+    let cfg = load_cfg(&bgd_root)?;
+    {
+        let mut guard = state.watcher.lock().map_err(|e| e.to_string())?;
+        if guard.is_some() {
+            // 先停旧监听（切换项目或重复启动）
+            let _ = guard.take();
+        }
+        let app_clone = app.clone();
+        let log = move |line: &str| emit_log(&app_clone, "watch", line);
+        let watcher = builder::start_watch(&bgd_root, &cfg, log).map_err(|e| e.to_string())?;
+        *guard = Some(watcher);
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn select_project(app: AppHandle, state: State<AppState>, path: String) -> Result<Vec<String>, String> {
     let root = PathBuf::from(&path);
     if !root.is_dir() {
         return Err("所选路径不是有效目录".to_string());
     }
-    *state.project.lock().map_err(|e| e.to_string())? = Some(root);
+    // 切换项目：先停掉旧项目的监听
+    {
+        let mut guard = state.watcher.lock().map_err(|e| e.to_string())?;
+        if guard.take().is_some() {
+            emit_log(&app, "watch", "[watch] 已切换项目，旧监听已停止");
+        }
+    }
+    *state.project.lock().map_err(|e| e.to_string())? = Some(root.clone());
     let app_data = app.path().app_config_dir().map_err(|e| e.to_string())?;
-    project::add_recent(&app_data, &path).map_err(|e| e.to_string())
+    let recent = project::add_recent(&app_data, &path).map_err(|e| e.to_string())?;
+
+    // 若监听开关为开且新项目已初始化，自动对新项目开启监听
+    let watch_enabled = app_data_dir(&app)
+        .map(|d| project::load_settings(&d).watch_enabled)
+        .unwrap_or(false);
+    if watch_enabled && root.join(".bgd").is_dir() {
+        if let Err(e) = try_start_watch(&app, &state) {
+            emit_log(&app, "watch", &format!("[error] 自动开启监听失败: {e}"));
+        } else {
+            emit_log(&app, "watch", "[watch] 已对新项目自动开启监听");
+        }
+    }
+    Ok(recent)
 }
 
 #[tauri::command]
@@ -79,6 +118,15 @@ fn load_proxy(app: &AppHandle) -> String {
     app_data_dir(app)
         .map(|d| project::load_settings(&d).proxy)
         .unwrap_or_default()
+}
+
+/// 持久化监听开关状态
+fn persist_watch_enabled(app: &AppHandle, enabled: bool) {
+    if let Ok(dir) = app_data_dir(app) {
+        let mut settings = project::load_settings(&dir);
+        settings.watch_enabled = enabled;
+        let _ = project::save_settings(&dir, &settings);
+    }
 }
 
 #[tauri::command]
@@ -153,12 +201,8 @@ fn start_watch(app: AppHandle, state: State<AppState>) -> Result<(), String> {
             return Err("监听已在运行中".to_string());
         }
     }
-    let bgd_root = state.bgd_root()?;
-    let cfg = load_cfg(&bgd_root)?;
-    let app_clone = app.clone();
-    let log = move |line: &str| emit_log(&app_clone, "watch", line);
-    let watcher = builder::start_watch(&bgd_root, &cfg, log).map_err(|e| e.to_string())?;
-    *state.watcher.lock().map_err(|e| e.to_string())? = Some(watcher);
+    try_start_watch(&app, &state)?;
+    persist_watch_enabled(&app, true);
     Ok(())
 }
 
@@ -168,6 +212,7 @@ fn stop_watch(app: AppHandle, state: State<AppState>) -> Result<(), String> {
     if guard.take().is_some() {
         emit_log(&app, "watch", "[watch] 监听已停止");
     }
+    persist_watch_enabled(&app, false);
     Ok(())
 }
 
@@ -225,6 +270,28 @@ pub fn run() {
         .manage(AppState {
             project: Mutex::new(None),
             watcher: Mutex::new(None),
+        })
+        .setup(|app| {
+            // 启动恢复：默认选中最近项目；若上次监听为开则自动开启
+            let handle = app.handle().clone();
+            let Ok(dir) = handle.path().app_config_dir() else {
+                return Ok(());
+            };
+            let recent = project::load_recent(&dir);
+            let Some(first) = recent.projects.first() else {
+                return Ok(());
+            };
+            let root = PathBuf::from(first);
+            if !root.is_dir() {
+                return Ok(());
+            }
+            let state = handle.state::<AppState>();
+            *state.project.lock().map_err(|e| e.to_string())? = Some(root.clone());
+            let settings = project::load_settings(&dir);
+            if settings.watch_enabled && root.join(".bgd").is_dir() {
+                let _ = try_start_watch(&handle, &state);
+            }
+            Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             select_project,

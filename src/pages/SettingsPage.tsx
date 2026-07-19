@@ -6,7 +6,7 @@ import Card from "../components/Card";
 /** 设置页：通用设置（代理）、项目配置（bgd.json 表单）、框架更新 */
 export default function SettingsPage() {
   const [config, setConfig] = useState<BgdConfig | null>(null);
-  const [appSettings, setAppSettings] = useState<AppSettings>({ proxy: "" });
+  const [appSettings, setAppSettings] = useState<AppSettings>({ proxy: "", watch_enabled: false });
   const [updateInfo, setUpdateInfo] = useState<FrameworkUpdateInfo | null>(null);
   const [report, setReport] = useState<UpdateReport | null>(null);
   const [message, setMessage] = useState("");
@@ -109,7 +109,7 @@ export default function SettingsPage() {
           </span>
           <input
             value={appSettings.proxy}
-            onChange={(e) => setAppSettings({ proxy: e.target.value })}
+            onChange={(e) => setAppSettings((prev) => ({ ...prev, proxy: e.target.value }))}
             placeholder="http://127.0.0.1:7897"
             className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm text-slate-700 dark:border-slate-600 dark:text-slate-200"
           />
@@ -194,7 +194,6 @@ export default function SettingsPage() {
           {textField("游戏服务端产物", "game_server_target")}
           {textField("游戏客户端产物", "game_client_target")}
           {textField("资源输出目录", "asset_target")}
-          {textField("模板目录", "templates_dir")}
           {textField("服务端入口", "server_entrance")}
           {textField("客户端入口", "client_entrance")}
         </div>
