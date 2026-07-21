@@ -116,6 +116,27 @@ fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path().app_config_dir().map_err(|e| e.to_string())
 }
 
+/// 确保安装目录在用户 PATH 中（首次启动/更新后自检写入，替代不可靠的 NSIS 钩子）
+/// 用 CREATE_NO_WINDOW 隐藏子进程控制台，避免 GUI 应用启动时闪黑窗
+fn ensure_path_registered() {
+    use std::os::windows::process::CommandExt;
+    use std::process::Command;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    let Ok(exe) = std::env::current_exe() else { return };
+    let Some(dir) = exe.parent() else { return };
+    let dir_str = dir.to_string_lossy().to_string();
+    // PowerShell：PATH 不含安装目录才追加（幂等）
+    let script = format!(
+        "$i='{}'; $p=(Get-ItemProperty -Path 'HKCU:\\Environment' -Name Path -ErrorAction SilentlyContinue).Path; if (($p -split ';') -notcontains $i) {{ $n = if ($p) {{ $p + ';' + $i }} else {{ $i }}; Set-ItemProperty -Path 'HKCU:\\Environment' -Name Path -Value $n }}",
+        dir_str.replace('\'', "''")
+    );
+    let _ = Command::new("powershell")
+        .args(["-NoProfile", "-Command", &script])
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn();
+}
+
 fn load_proxy(app: &AppHandle) -> String {
     app_data_dir(app)
         .map(|d| project::load_settings(&d).proxy)
@@ -283,6 +304,8 @@ pub fn run() {
             watcher: Mutex::new(None),
         })
         .setup(|app| {
+            // 确保安装目录在用户 PATH（CLI 可用）
+            ensure_path_registered();
             // 启动恢复：默认选中最近项目；若上次监听为开则自动开启
             let handle = app.handle().clone();
             let Ok(dir) = handle.path().app_config_dir() else {

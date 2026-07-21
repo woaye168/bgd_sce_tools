@@ -1,19 +1,9 @@
-; NSIS 安装钩子：把安装目录写入用户 PATH（便于 CLI 直接调用）
-; 注意：Tauri 在 Section 上下文之外调用本钩子，不能使用 StrFunc 等
-; 只能在 Section/Function 内使用的指令，统一用 nsExec::Exec 调 PowerShell 处理
+; NSIS 安装钩子（保留占位；PATH 注册已改为应用启动时自检写入，见 lib.rs ensure_path_registered）
+; 原因：Tauri 对 NSIS_HOOK_POSTINSTALL 的调用时机在更新/重装场景下不稳定，
+; 改为应用每次启动时检查并写入用户 PATH，确定性更高。
 
 !macro NSIS_HOOK_POSTINSTALL
-  ; 追加安装目录到用户 PATH（PowerShell 内部判断重复，幂等）
-  ; 记录安装日志到 %TEMP%（验证钩子是否被调用）
-  FileOpen $0 "$TEMP\bgd_sce_tools-install.log" w
-  FileWrite $0 "POSTINSTALL hook executed, INSTDIR=$INSTDIR$\r$\n"
-  FileClose $0
-  nsExec::Exec 'powershell -NoProfile -WindowStyle Hidden -Command "$i=''$INSTDIR''; $p=(Get-ItemProperty -Path ''HKCU:\Environment'' -Name Path -ErrorAction SilentlyContinue).Path; if (($p -split '';'' ) -notcontains $i) { $n = if ($p) { $p + '';'' + $i } else { $i }; Set-ItemProperty -Path ''HKCU:\Environment'' -Name Path -Value $n }"'
-  SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL
-  ; 从用户 PATH 移除安装目录
-  nsExec::Exec 'powershell -NoProfile -WindowStyle Hidden -Command "$i=''$INSTDIR''; $p=(Get-ItemProperty -Path ''HKCU:\Environment'' -Name Path -ErrorAction SilentlyContinue).Path; $n=($p -split '';'' | Where-Object { $_ -and ($_ -ne $i) }) -join '';''; Set-ItemProperty -Path ''HKCU:\Environment'' -Name Path -Value $n"'
-  SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
 !macroend

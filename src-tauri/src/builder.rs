@@ -64,18 +64,19 @@ pub fn remove_watch_state(bgd_root: &Path) {
     let _ = fs::remove_file(watch_state_path(bgd_root));
 }
 
-/// 判断指定 PID 的进程是否存活（Windows：OpenProcess 成功即存活）
+/// 判断指定 PID 的进程是否存活（Windows：tasklist 过滤；CREATE_NO_WINDOW 隐藏控制台）
 fn pid_alive(pid: u32) -> bool {
     #[cfg(windows)]
     {
+        use std::os::windows::process::CommandExt;
         use std::process::Command;
-        // tasklist 按 PID 精确过滤；找到即存活
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
         if let Ok(out) = Command::new("tasklist")
             .args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"])
+            .creation_flags(CREATE_NO_WINDOW)
             .output()
         {
             let stdout = String::from_utf8_lossy(&out.stdout);
-            // 无匹配时输出 "INFO: No tasks are running..."
             return !stdout.contains("No tasks") && stdout.contains(&pid.to_string());
         }
         false

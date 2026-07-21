@@ -139,24 +139,27 @@ fn load_project_config(project_root: &Path) -> Result<(PathBuf, BgdConfig)> {
     Ok((bgd_root, cfg))
 }
 
-/// 命中 CLI 子命令时执行并返回进程退出码；否则返回 None（进入 GUI）
-pub fn run() -> Option<i32> {
-    // 无参数 => GUI；有参数但第一个是未知子命令 => 报 CLI 用法错误
-    let Some(first) = std::env::args().nth(1) else {
-        return None;
-    };
-    const CMDS: [&str; 7] = [
-        "build",
-        "clean",
-        "clean-logs",
-        "init",
-        "update-framework",
-        "check-framework",
-        "check-watch",
-    ];
+const CMDS: [&str; 7] = [
+    "build",
+    "clean",
+    "clean-logs",
+    "init",
+    "update-framework",
+    "check-framework",
+    "check-watch",
+];
+
+/// 是否命中 CLI 调用（供 main 决定是否 AttachConsole）
+pub fn is_cli_invocation() -> bool {
+    std::env::args().nth(1).is_some()
+}
+
+/// 命中 CLI 子命令时执行并返回进程退出码（调用方保证已判断 is_cli_invocation）
+pub fn run() -> i32 {
+    let first = std::env::args().nth(1).unwrap_or_default();
     if !CMDS.contains(&first.as_str()) && first != "--help" && first != "-h" {
         eprintln!("未知子命令: {first}\n\n{USAGE}");
-        return Some(2);
+        return 2;
     }
 
     let result = (|| -> Result<()> {
@@ -220,10 +223,10 @@ pub fn run() -> Option<i32> {
     })();
 
     match result {
-        Ok(()) => Some(0),
+        Ok(()) => 0,
         Err(e) => {
             eprintln!("错误: {e:#}");
-            Some(1)
+            1
         }
     }
 }

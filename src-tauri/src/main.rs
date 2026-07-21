@@ -3,10 +3,22 @@
 
 mod cli;
 
+/// release 模式是 windows 子系统（无控制台），CLI 子命令的 stdout 会被吞。
+/// 命中 CLI 时附加到父进程控制台，使 println 输出到调用方终端。
+#[cfg(windows)]
+fn attach_parent_console() {
+    unsafe {
+        // ATTACH_PARENT_PROCESS = -1 (0xFFFFFFFF)
+        windows_sys::Win32::System::Console::AttachConsole(0xFFFFFFFF);
+    }
+}
+
 fn main() {
     // 命中 CLI 子命令则以控制台模式执行；否则启动 GUI
-    if let Some(code) = cli::run() {
-        std::process::exit(code);
+    if cli::is_cli_invocation() {
+        #[cfg(windows)]
+        attach_parent_console();
+        std::process::exit(cli::run());
     }
     bgd_sce_tools_lib::run()
 }
