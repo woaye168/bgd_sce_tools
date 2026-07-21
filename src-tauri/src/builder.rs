@@ -331,14 +331,24 @@ pub fn update_entrance(kind: &str, bgd_root: &Path, cfg: &BgdConfig, log: &LogFn
     let libs_content = rewrite_lua(&fs::read_to_string(&libs_entrance).unwrap_or_default(), kind, cfg);
     let game_content = rewrite_lua(&fs::read_to_string(&game_entrance).unwrap_or_default(), kind, cfg);
 
-    // 提取原文：含标记取标记之前；不含标记则整个现有文件视为原文（首次接入）
+    // 提取原文：含标记取标记之前；不含标记则整个现有文件视为原文（首次接入）。
+    // 防御：若"原文"自身仍含标记（历史脏数据导致标记堆积），视为损坏，丢弃原文，
+    // 让本次构建以空原文重新生成（一次构建即自愈）。
     let mut original = String::new();
     if dest.exists() {
         let existing = fs::read_to_string(&dest).unwrap_or_default();
-        original = match existing.find(ENTRANCE_MARKER) {
+        let mut candidate = match existing.find(ENTRANCE_MARKER) {
             Some(pos) => existing[..pos].to_string(),
             None => existing,
         };
+        if candidate.contains(ENTRANCE_MARKER) {
+            log(&format!(
+                "[warn] 入口文件检测到残留标记（历史脏数据），已丢弃损坏原文并重建: {}",
+                dest.display()
+            ));
+            candidate = String::new();
+        }
+        original = candidate;
     }
 
     let mut generated = libs_content.clone();
@@ -634,42 +644,30 @@ fn handle_file(path: &Path, deleted: bool, bgd_root: &Path, cfg: &BgdConfig, log
     }
 }
 
-fn handle_watch_event(event: &Event, bgd_root: &Path, cfg: &BgdConfig, log: &LogFn) {
-    for path in &event.paths {
-        if path.is_dir() {
-            continue;
-        }
-        match event.kind {
-            EventKind::Create(_) | EventKind::Modify(_) => {
-                handle_file(path, false, bgd_root, cfg, log);
-            }
-            EventKind::Remove(_) => {
-                handle_file(path, true, bgd_root, cfg, log);
-            }
-            _ => {}
-        }
-    }
-}
-
-/// 启动监听（notify 事件驱动）。返回 watcher 句柄，由调用方持有；drop 即停止。
+/// 启动监听（notify 事件驱动，带事件去重）。返回 watcher 句柄，由调用方持有；drop 即停止。
+///
+/// Windows 编辑器保存文件（尤其原子保存）会对一次保存派发多个事件，直接逐事件处理
+/// 会产生重复构建/重复日志。这里把同一文件在短时间窗口内的事件聚合为一次：
+/// 只要窗口结束时文件仍存在就构建一次，不存在则删除一次。
 pub fn start_watch<L>(bgd_root: &Path, cfg: &BgdConfig, log: L) -> Result<RecommendedWatcher>
 where
     L: Fn(&str) + Send + Sync + 'static,
 {
+    use std::collections::HashMap;
+    use std::sync::mpsc;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    const DEBOUNCE_MS: u64 = 300;
+
     let bgd_root = bgd_root.to_path_buf();
     let cfg = cfg.clone();
-    let log = std::sync::Arc::new(log);
+    let log = Arc::new(log);
 
-    let log_cb = log.clone();
-    let bgd_cb = bgd_root.clone();
-    let cfg_cb = cfg.clone();
+    let (tx, rx) = mpsc::channel::<Event>();
     let mut watcher = notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
-        match res {
-            Ok(event) => {
-                let log_line = |s: &str| (log_cb)(s);
-                handle_watch_event(&event, &bgd_cb, &cfg_cb, &log_line);
-            }
-            Err(e) => (log_cb)(&format!("[error] 监听事件错误: {e}")),
+        if let Ok(event) = res {
+            let _ = tx.send(event);
         }
     })?;
 
@@ -682,5 +680,54 @@ where
         }
     }
     (log)("[watch] 监听已启动");
+
+    // 后台线程：收集事件并按文件去重后批量处理
+    let bgd_cb = bgd_root.clone();
+    let cfg_cb = cfg.clone();
+    let log_cb = log.clone();
+    std::thread::spawn(move || {
+        // path -> (deleted, last_seen)
+        let mut pending: HashMap<PathBuf, (bool, Instant)> = HashMap::new();
+        loop {
+            match rx.recv_timeout(Duration::from_millis(DEBOUNCE_MS)) {
+                Ok(event) => {
+                    for path in event.paths {
+                        if path.is_dir() {
+                            continue;
+                        }
+                        let deleted = matches!(event.kind, EventKind::Remove(_));
+                        pending
+                            .entry(path)
+                            .and_modify(|e| {
+                                e.0 = deleted;
+                                e.1 = Instant::now();
+                            })
+                            .or_insert((deleted, Instant::now()));
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    // 处理已静默超过窗口的文件
+                    let now = Instant::now();
+                    let ready: Vec<PathBuf> = pending
+                        .iter()
+                        .filter(|(_, (_, t))| now.duration_since(*t) >= Duration::from_millis(DEBOUNCE_MS))
+                        .map(|(p, _)| p.clone())
+                        .collect();
+                    if ready.is_empty() {
+                        continue;
+                    }
+                    let log_line = |s: &str| (log_cb)(s);
+                    for path in ready {
+                        let (deleted, _) = pending.remove(&path).unwrap_or((false, now));
+                        // 最终状态以文件实际存在性为准（避免误删）
+                        let actually_deleted = deleted && !path.exists();
+                        handle_file(&path, actually_deleted, &bgd_cb, &cfg_cb, &log_line);
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+    });
+
     Ok(watcher)
 }
