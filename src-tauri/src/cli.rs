@@ -106,7 +106,8 @@ impl Logger {
                 }
                 let f = std::fs::OpenOptions::new()
                     .create(true)
-                    .append(true)
+                    .write(true)
+                    .truncate(true)
                     .open(&abs)
                     .with_context(|| format!("无法打开日志文件: {}", abs.display()))?;
                 Some(Mutex::new(f))
