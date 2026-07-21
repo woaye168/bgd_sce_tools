@@ -103,6 +103,22 @@ pnpm tauri dev      # 开发模式（前端热更新 + Rust 自动重编译）
 pnpm tauri build    # 产出 NSIS 安装包（src-tauri/target/release/bundle/）
 ```
 
+### CLI 子命令
+
+exe 命中子命令即以控制台模式执行（否则启动 GUI），可用于脚本与无 GUI 环境：
+
+```bash
+bgd_sce_tools build --project <项目路径>             # 全量构建
+bgd_sce_tools clean --project <项目路径>             # 清除构建（还原入口原文）
+bgd_sce_tools clean-logs --project <项目路径>        # 清理日志
+bgd_sce_tools init --project <路径> [--force]        # 初始化项目
+bgd_sce_tools update-framework --project <路径>      # 增量更新框架
+bgd_sce_tools check-framework --project <路径>       # 检查框架更新
+# 可选参数：--repo owner/repo  --proxy http://127.0.0.1:7897
+```
+
+开发期等价：`cargo run -- build --project ...`（在 `src-tauri/` 下）。
+
 ### Fork 后必改清单（重要）
 
 fork 本仓库（及 [bgd_sce_framework](https://github.com/woaye168/bgd_sce_framework)）后，需要修改以下位置才能完整使用：
@@ -182,4 +198,4 @@ git push origin v0.1.4
 
 ## 许可证
 
-尚未指定，后续补充。二次开发前请先与作者确认。
+本项目采用 [GNU General Public License v3.0](LICENSE) 开源。

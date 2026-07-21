@@ -1,8 +1,8 @@
 //! BGD_SCE_TOOLS 主入口：Tauri 命令注册与应用状态管理
 
-mod builder;
-mod config;
-mod project;
+pub mod builder;
+pub mod config;
+pub mod project;
 
 use config::BgdConfig;
 use std::path::{Path, PathBuf};

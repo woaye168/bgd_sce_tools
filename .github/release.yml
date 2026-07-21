@@ -1,0 +1,29 @@
+# Release 更新日志自动归纳配置
+# 按提交前缀分组展示，贡献者自动去重并链接
+
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+  categories:
+    - title: "🚀 新功能"
+      labels:
+        - feature
+        - feat
+    - title: "🐛 问题修复"
+      labels:
+        - fix
+        - bugfix
+        - bug
+    - title: "🧰 构建与工具链"
+      labels:
+        - ci
+        - build
+        - chore
+    - title: "📝 文档"
+      labels:
+        - docs
+        - documentation
+    - title: "其他变更"
+      labels:
+        - "*"
