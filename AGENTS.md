@@ -97,7 +97,7 @@ git tag -a vX.Y.Z          # 无需写注解，Release notes 自动生成
 git push origin vX.Y.Z
 ```
 
-Release notes 由 GitHub 按 `.github/release.yml` 的分组规则自动归纳（关联本 tag 与前一个 tag 之间的提交）。提交信息请遵循 `feat: / fix: / ci: / docs:` 前缀以获得正确分组。
+Release notes 由 GitHub 按 `.github/release.yml` 自动归纳（基于 PR 分类，直接推 main 的提交归入"其他变更"）。Release 底部自动附版本间 Full Changelog 对比链接，完整呈现该版本的所有提交。
 
 ## 注意事项
 

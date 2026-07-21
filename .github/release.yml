@@ -1,5 +1,6 @@
-# Release 更新日志自动归纳配置
-# 按提交前缀分组展示，贡献者自动去重并链接
+# Release 更新日志自动归纳配置（基于 PR 分类）
+# 由于日常直接推 main（非 PR），多数提交会进入"其他变更"，
+# 完整的版本间提交关联见 Release 底部的 Full Changelog 链接
 
 changelog:
   exclude:
@@ -10,16 +11,12 @@ changelog:
       labels:
         - feature
         - feat
+        - enhancement
     - title: "🐛 问题修复"
       labels:
         - fix
         - bugfix
         - bug
-    - title: "🧰 构建与工具链"
-      labels:
-        - ci
-        - build
-        - chore
     - title: "📝 文档"
       labels:
         - docs
