@@ -4,6 +4,10 @@
 
 !macro NSIS_HOOK_POSTINSTALL
   ; 追加安装目录到用户 PATH（PowerShell 内部判断重复，幂等）
+  ; 记录安装日志到 %TEMP%（验证钩子是否被调用）
+  FileOpen $0 "$TEMP\bgd_sce_tools-install.log" w
+  FileWrite $0 "POSTINSTALL hook executed, INSTDIR=$INSTDIR$\r$\n"
+  FileClose $0
   nsExec::Exec 'powershell -NoProfile -WindowStyle Hidden -Command "$i=''$INSTDIR''; $p=(Get-ItemProperty -Path ''HKCU:\Environment'' -Name Path -ErrorAction SilentlyContinue).Path; if (($p -split '';'' ) -notcontains $i) { $n = if ($p) { $p + '';'' + $i } else { $i }; Set-ItemProperty -Path ''HKCU:\Environment'' -Name Path -Value $n }"'
   SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
 !macroend
