@@ -1,34 +1,15 @@
 ; NSIS 安装钩子：把安装目录写入用户 PATH（便于 CLI 直接调用）
-; 用 StrStr 判断是否已存在（避免 StrFunc 版本兼容问题），仅不存在才追加
-
-!include "StrFunc.nsh"
-${StrStr}
+; 注意：Tauri 在 Section 上下文之外调用本钩子，不能使用 StrFunc 等
+; 只能在 Section/Function 内使用的指令，统一用 nsExec::Exec 调 PowerShell 处理
 
 !macro NSIS_HOOK_POSTINSTALL
-  ReadRegStr $0 HKCU "Environment" "Path"
-  ${StrStr} $1 "$0" "$INSTDIR"
-  StrCmp $1 "" 0 hook_addpath_done
-    StrCmp $0 "" 0 hook_addpath_semi
-      StrCpy $0 "$INSTDIR"
-      Goto hook_addpath_write
-    hook_addpath_semi:
-      StrCpy $0 "$0;$INSTDIR"
-    hook_addpath_write:
-      WriteRegStr HKCU "Environment" "Path" "$0"
-      SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
-  hook_addpath_done:
+  ; 追加安装目录到用户 PATH（PowerShell 内部判断重复，幂等）
+  nsExec::Exec 'powershell -NoProfile -WindowStyle Hidden -Command "$i=''$INSTDIR''; $p=(Get-ItemProperty -Path ''HKCU:\Environment'' -Name Path -ErrorAction SilentlyContinue).Path; if (($p -split '';'' ) -notcontains $i) { $n = if ($p) { $p + '';'' + $i } else { $i }; Set-ItemProperty -Path ''HKCU:\Environment'' -Name Path -Value $n }"'
+  SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL
-  ; 卸载：从用户 PATH 移除安装目录（StrStr 判断存在后，用 StrRep 精确移除）
-  ReadRegStr $0 HKCU "Environment" "Path"
-  ${StrStr} $1 "$0" "$INSTDIR"
-  StrCmp $1 "" hook_rmpath_done
-    ; 先移除带尾分号的形式，再移除带头分号的形式，最后移除单独形式
-    ${StrRep} $1 "$0" "$INSTDIR;" ""
-    ${StrRep} $1 "$1" ";$INSTDIR" ""
-    ${StrRep} $1 "$1" "$INSTDIR" ""
-    WriteRegStr HKCU "Environment" "Path" "$1"
-    SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
-  hook_rmpath_done:
+  ; 从用户 PATH 移除安装目录
+  nsExec::Exec 'powershell -NoProfile -WindowStyle Hidden -Command "$i=''$INSTDIR''; $p=(Get-ItemProperty -Path ''HKCU:\Environment'' -Name Path -ErrorAction SilentlyContinue).Path; $n=($p -split '';'' | Where-Object { $_ -and ($_ -ne $i) }) -join '';''; Set-ItemProperty -Path ''HKCU:\Environment'' -Name Path -Value $n"'
+  SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
 !macroend
