@@ -86,6 +86,8 @@ fn select_project(app: AppHandle, state: State<AppState>, path: String) -> Resul
             emit_log(&app, "watch", &format!("[error] 自动开启监听失败: {e}"));
         } else {
             emit_log(&app, "watch", "[watch] 已对新项目自动开启监听");
+            let bgd_root = root.join(".bgd");
+            builder::write_watch_state(&bgd_root, &root);
         }
     }
     Ok(recent)
@@ -203,6 +205,12 @@ fn start_watch(app: AppHandle, state: State<AppState>) -> Result<(), String> {
     }
     try_start_watch(&app, &state)?;
     persist_watch_enabled(&app, true);
+    // 写入监听状态文件（供 CLI check-watch 跨进程判断）
+    if let Ok(bgd_root) = state.bgd_root() {
+        if let Some(project_root) = bgd_root.parent() {
+            builder::write_watch_state(&bgd_root, project_root);
+        }
+    }
     Ok(())
 }
 
@@ -211,6 +219,9 @@ fn stop_watch(app: AppHandle, state: State<AppState>) -> Result<(), String> {
     let mut guard = state.watcher.lock().map_err(|e| e.to_string())?;
     if guard.take().is_some() {
         emit_log(&app, "watch", "[watch] 监听已停止");
+        if let Ok(bgd_root) = state.bgd_root() {
+            builder::remove_watch_state(&bgd_root);
+        }
     }
     persist_watch_enabled(&app, false);
     Ok(())
@@ -289,7 +300,10 @@ pub fn run() {
             *state.project.lock().map_err(|e| e.to_string())? = Some(root.clone());
             let settings = project::load_settings(&dir);
             if settings.watch_enabled && root.join(".bgd").is_dir() {
-                let _ = try_start_watch(&handle, &state);
+                if try_start_watch(&handle, &state).is_ok() {
+                    let bgd_root = root.join(".bgd");
+                    builder::write_watch_state(&bgd_root, &root);
+                }
             }
             Ok(())
         })

@@ -7,6 +7,7 @@
 use anyhow::{Context, Result};
 use bgd_sce_tools_lib::{builder, config::BgdConfig, project};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 const USAGE: &str = "\
 bgd_sce_tools CLI
@@ -20,16 +21,18 @@ bgd_sce_tools CLI
   init                   初始化项目（下载框架生成 .bgd）
   update-framework       增量更新框架（三路哈希对比）
   check-framework        检查框架是否有新版本
+  check-watch            检查项目当前是否处于监听中
 
 选项:
   --project <路径>        项目根目录（缺省为当前目录）
   --proxy <地址>          HTTP 代理，如 http://127.0.0.1:7897
   --repo <owner/repo>     框架仓库（缺省内置默认）
   --force                 init 时强制执行（存在 init.lock 时覆盖，自动备份）
+  --log <路径>            将过程日志同时写入指定文件（便于无 GUI 环境查看）
 
 示例:
-  bgd_sce_tools build --project D:\\maps\\my_game
-  bgd_sce_tools update-framework --proxy http://127.0.0.1:7897
+  bgd_sce_tools build --project D:\\maps\\my_game --log .bgd/log/build.log
+  bgd_sce_tools check-watch --project D:\\maps\\my_game
 ";
 
 struct Cli {
@@ -38,6 +41,7 @@ struct Cli {
     proxy: String,
     repo: String,
     force: bool,
+    log_file: Option<PathBuf>,
 }
 
 fn parse_args() -> Result<Cli> {
@@ -48,6 +52,7 @@ fn parse_args() -> Result<Cli> {
         proxy: String::new(),
         repo: String::new(),
         force: false,
+        log_file: None,
     };
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -59,6 +64,9 @@ fn parse_args() -> Result<Cli> {
             }
             "--repo" => {
                 cli.repo = args.next().context("--repo 缺少仓库")?;
+            }
+            "--log" => {
+                cli.log_file = Some(PathBuf::from(args.next().context("--log 缺少路径")?));
             }
             "--force" => cli.force = true,
             "--help" | "-h" => {
@@ -82,9 +90,41 @@ fn parse_args() -> Result<Cli> {
     Ok(cli)
 }
 
-/// 无 GUI 模式的日志回调：直接输出到 stdout
-fn stdout_log(line: &str) {
-    println!("{line}");
+/// 无 GUI 模式的日志回调：输出到 stdout；若指定 --log 则同时写文件
+struct Logger {
+    file: Option<Mutex<std::fs::File>>,
+}
+
+impl Logger {
+    fn new(path: Option<&PathBuf>, project_root: &Path) -> Result<Self> {
+        let file = match path {
+            Some(p) => {
+                // 相对路径按项目根解析
+                let abs = if p.is_absolute() { p.clone() } else { project_root.join(p) };
+                if let Some(parent) = abs.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                let f = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&abs)
+                    .with_context(|| format!("无法打开日志文件: {}", abs.display()))?;
+                Some(Mutex::new(f))
+            }
+            None => None,
+        };
+        Ok(Self { file })
+    }
+
+    fn log(&self, line: &str) {
+        println!("{line}");
+        if let Some(f) = &self.file {
+            use std::io::Write;
+            if let Ok(mut f) = f.lock() {
+                let _ = writeln!(f, "{line}");
+            }
+        }
+    }
 }
 
 fn load_project_config(project_root: &Path) -> Result<(PathBuf, BgdConfig)> {
@@ -105,13 +145,14 @@ pub fn run() -> Option<i32> {
     let Some(first) = std::env::args().nth(1) else {
         return None;
     };
-    const CMDS: [&str; 6] = [
+    const CMDS: [&str; 7] = [
         "build",
         "clean",
         "clean-logs",
         "init",
         "update-framework",
         "check-framework",
+        "check-watch",
     ];
     if !CMDS.contains(&first.as_str()) && first != "--help" && first != "-h" {
         eprintln!("未知子命令: {first}\n\n{USAGE}");
@@ -120,7 +161,8 @@ pub fn run() -> Option<i32> {
 
     let result = (|| -> Result<()> {
         let cli = parse_args()?;
-        let log = stdout_log;
+        let logger = Logger::new(cli.log_file.as_ref(), &cli.project)?;
+        let log = |line: &str| logger.log(line);
         match cli.cmd.as_str() {
             "build" => {
                 let (bgd_root, cfg) = load_project_config(&cli.project)?;
@@ -136,13 +178,13 @@ pub fn run() -> Option<i32> {
             }
             "init" => {
                 let msg = project::init_project(&cli.project, &cli.repo, &cli.proxy, cli.force, &log)?;
-                println!("{msg}");
+                logger.log(&msg);
             }
             "update-framework" => {
                 let (_bgd_root, cfg) = load_project_config(&cli.project)?;
                 let report =
                     project::update_framework(&cli.project, &cfg.framework_repo, &cli.proxy, &log)?;
-                println!(
+                logger.log(&format!(
                     "更新报告: version={} updated={} added={} removed={} kept_local={} conflicts={}",
                     report.version,
                     report.updated,
@@ -150,19 +192,27 @@ pub fn run() -> Option<i32> {
                     report.removed,
                     report.kept_local,
                     report.conflicts.len()
-                );
+                ));
                 for c in &report.conflicts {
-                    println!("  冲突: {c}");
+                    logger.log(&format!("  冲突: {c}"));
                 }
                 for n in &report.notes {
-                    println!("  备注: {n}");
+                    logger.log(&format!("  备注: {n}"));
                 }
             }
             "check-framework" => {
                 let (_bgd_root, cfg) = load_project_config(&cli.project)?;
                 let latest = project::latest_framework_version(&cfg.framework_repo, &cli.proxy)?;
-                println!("当前: {}", cfg.framework_version);
-                println!("最新: {}", latest.as_deref().unwrap_or("(无法获取)"));
+                logger.log(&format!("当前: {}", cfg.framework_version));
+                logger.log(&format!("最新: {}", latest.as_deref().unwrap_or("(无法获取)")));
+            }
+            "check-watch" => {
+                let bgd_root = cli.project.join(".bgd");
+                if builder::is_watching(&bgd_root) {
+                    logger.log("监听中（保存即自动增量构建，无需手动构建）");
+                } else {
+                    logger.log("未监听（修改后需执行「全量构建」或本工具 build 命令）");
+                }
             }
             _ => unreachable!(),
         }

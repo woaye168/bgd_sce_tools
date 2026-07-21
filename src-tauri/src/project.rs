@@ -271,6 +271,14 @@ pub fn init_project(project_root: &Path, repo: &str, proxy: &str, force: bool, l
     crate::builder::merge_emmyrc(&dest_bgd, &cfg, log)?;
     crate::builder::merge_gitignore(&dest_bgd, &cfg, log)?;
 
+    // 项目根 AGENTS.md 模板（AI 引导指针），不存在才复制（避免覆盖用户改动）
+    let agents_tpl = dest_bgd.join("src").join("AGENTS.md");
+    let agents_dest = project_root.join("AGENTS.md");
+    if agents_tpl.exists() && !agents_dest.exists() {
+        copy_file(&agents_tpl, &agents_dest)?;
+        log("已生成项目根 AGENTS.md（AI 引导）");
+    }
+
     // 记录框架来源与版本（tag 去 v 前缀）
     let mut cfg = cfg;
     cfg.framework_repo = effective_repo(repo).to_string();

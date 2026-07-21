@@ -108,14 +108,17 @@ pnpm tauri build    # 产出 NSIS 安装包（src-tauri/target/release/bundle/�
 exe 命中子命令即以控制台模式执行（否则启动 GUI），可用于脚本与无 GUI 环境：
 
 ```bash
-bgd_sce_tools build --project <项目路径>             # 全量构建
+bgd_sce_tools build --project <项目路径> [--log .bgd/log/build.log]   # 全量构建
 bgd_sce_tools clean --project <项目路径>             # 清除构建（还原入口原文）
 bgd_sce_tools clean-logs --project <项目路径>        # 清理日志
 bgd_sce_tools init --project <路径> [--force]        # 初始化项目
 bgd_sce_tools update-framework --project <路径>      # 增量更新框架
 bgd_sce_tools check-framework --project <路径>       # 检查框架更新
-# 可选参数：--repo owner/repo  --proxy http://127.0.0.1:7897
+bgd_sce_tools check-watch --project <项目路径>       # 判断是否监听中
+# 可选参数：--repo owner/repo  --proxy http://127.0.0.1:7897  --log <日志路径>
 ```
+
+安装时会自动把安装目录写入用户 PATH，装完即可直接敲 `bgd_sce_tools`。
 
 开发期等价：`cargo run -- build --project ...`（在 `src-tauri/` 下）。
 
