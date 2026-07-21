@@ -327,8 +327,9 @@ pub fn update_entrance(kind: &str, bgd_root: &Path, cfg: &BgdConfig, log: &LogFn
     };
     let dest = cfg.abs(bgd_root, dest_rel);
 
-    let libs_content = fs::read_to_string(&libs_entrance).unwrap_or_default();
-    let game_content = fs::read_to_string(&game_entrance).unwrap_or_default();
+    // entrance 内容同样要走模块名改写（引号内 libs./src. 前缀 -> 运行时根名）
+    let libs_content = rewrite_lua(&fs::read_to_string(&libs_entrance).unwrap_or_default(), kind, cfg);
+    let game_content = rewrite_lua(&fs::read_to_string(&game_entrance).unwrap_or_default(), kind, cfg);
 
     // 提取原文：含标记取标记之前；不含标记则整个现有文件视为原文（首次接入）
     let mut original = String::new();
