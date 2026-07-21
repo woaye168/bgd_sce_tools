@@ -67,4 +67,4 @@ jobs:
           releaseDraft: false
           prerelease: false
           # 版本说明：git log 归纳版本间提交（见上方 Generate release notes）
-          body: ${{ steps.notes.outputs.body }}
+          releaseBody: ${{ steps.notes.outputs.body }}
