@@ -165,17 +165,13 @@ const DEFAULT_FRAMEWORK_REPO: &str = "你的用户名/bgd_sce_framework";
 
 ### 发布新版本（CI/CD）
 
-```bash
-# 1. 修改版本号（三处保持同步）
-#    src-tauri/tauri.conf.json -> version
-#    src-tauri/Cargo.toml      -> version
-#    package.json              -> version
-#    （可选）src/pages/AboutPage.tsx 的 APP_VERSION 显示常量
+版本号**唯一来源是 git tag**，CI 构建时自动注入 `tauri.conf.json` 与 `Cargo.toml`；源码中固定为 `0.0.0-dev` 占位，无需手工同步。
 
-# 2. 提交并打 tag 推送
+```bash
+# 提交并打 tag 推送（无需写注解，Release notes 自动生成）
 git add -A && git commit -m "chore(release): v0.1.4"
 git push
-git tag -a v0.1.4 -m "v0.1.4"
+git tag -a v0.1.4
 git push origin v0.1.4
 ```
 

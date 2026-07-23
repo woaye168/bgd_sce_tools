@@ -278,7 +278,19 @@ fn init_project(app: AppHandle, state: State<AppState>, path: String, repo: Stri
     let proxy = load_proxy(&app);
     let msg = project::init_project(&root, &repo, &proxy, force, &log).map_err(|e| e.to_string())?;
     // 初始化完成后自动设为当前项目
-    *state.project.lock().map_err(|e| e.to_string())? = Some(root);
+    *state.project.lock().map_err(|e| e.to_string())? = Some(root.clone());
+    // 若监听开关为开，自动恢复监听（init 前已停掉，此处按用户选择的状态恢复）
+    let watch_enabled = app_data_dir(&app)
+        .map(|d| project::load_settings(&d).watch_enabled)
+        .unwrap_or(false);
+    if watch_enabled && root.join(".bgd").is_dir() {
+        if let Err(e) = try_start_watch(&app, &state) {
+            emit_log(&app, "watch", &format!("[error] 初始化后自动恢复监听失败: {e}"));
+        } else if let Ok(bgd_root) = state.bgd_root() {
+            builder::write_watch_state(&bgd_root, &root);
+            emit_log(&app, "watch", "[watch] 监听已自动恢复");
+        }
+    }
     Ok(msg)
 }
 
