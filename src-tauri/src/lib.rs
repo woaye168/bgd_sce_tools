@@ -165,13 +165,17 @@ fn save_app_settings(app: AppHandle, settings: project::AppSettings) -> Result<(
 #[tauri::command]
 fn get_project_info(state: State<AppState>) -> Result<serde_json::Value, String> {
     let bgd_root = state.bgd_root()?;
+    // 初始化真实标志：init.lock 存在（删除 lock 即视为未初始化，可重新初始化）
+    if !bgd_root.join("init.lock").exists() {
+        return Ok(serde_json::json!({ "initialized": false }));
+    }
     match BgdConfig::load(&bgd_root) {
         Ok(cfg) => Ok(serde_json::json!({
             "initialized": true,
             "framework_version": cfg.framework_version,
             "framework_repo": cfg.framework_repo,
         })),
-        Err(_) => Ok(serde_json::json!({ "initialized": false })),
+        Err(_) => Ok(serde_json::json!({ "initialized": true })),
     }
 }
 

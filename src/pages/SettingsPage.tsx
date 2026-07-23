@@ -13,10 +13,11 @@ export default function SettingsPage() {
   const [settingsMsg, setSettingsMsg] = useState("");
   const [busy, setBusy] = useState(false);
 
+  // 进入页面即刷新配置（含 init.lock / bgd.json 最新状态）
   useEffect(() => {
     api.getConfig().then(setConfig).catch(() => setConfig(null));
     api.getAppSettings().then(setAppSettings).catch(() => {});
-  }, []);
+  });
 
   const saveAppSettings = async () => {
     setBusy(true);

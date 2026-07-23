@@ -1,14 +1,19 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { check } from "@tauri-apps/plugin-updater";
+import { getVersion } from "@tauri-apps/api/app";
 import { api } from "../lib/api";
 import Card from "../components/Card";
-
-const APP_VERSION = "0.2.8";
 
 /** 关于页：版本信息 + 检查更新（自动更新） */
 export default function AboutPage() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [appVersion, setAppVersion] = useState("...");
+
+  // 版本号来自 tauri.conf.json（CI 构建时由 git tag 注入），不再硬编码
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => setAppVersion("unknown"));
+  }, []);
 
   const checkUpdate = async () => {
     setBusy(true);
@@ -38,7 +43,7 @@ export default function AboutPage() {
     <div className="space-y-5">
       <Card title="bgd_sce_tools">
         <div className="space-y-2 text-sm text-slate-600 dark:text-slate-300">
-          <p>版本: {APP_VERSION}</p>
+          <p>版本: {appVersion}</p>
           <p>BGD 工作室 · 星火编辑器 Lua 框架构建工具</p>
           <p className="text-xs text-slate-400">
             功能：项目初始化 / 全量构建 / 清除构建 / 监听更新 / 清理日志 / 框架更新

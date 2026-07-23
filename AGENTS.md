@@ -34,15 +34,20 @@ exe 命中子命令即以控制台模式执行，否则启动 GUI。**测 CLI �
 
 ```bash
 bgd_sce_tools build --project <项目路径> [--log .bgd/log/build.log]   # 全量构建
+bgd_sce_tools watch --project <项目路径> [--log .bgd/log/watch.log]   # 监听更新（前台阻塞，Ctrl+C 停止）
 bgd_sce_tools clean --project <项目路径>             # 清除构建（还原入口原文）
 bgd_sce_tools clean-logs --project <项目路径>        # 清理 .bgd/log
 bgd_sce_tools init --project <路径> [--force] [--repo owner/repo] [--proxy http://...]
 bgd_sce_tools update-framework --project <路径> [--proxy http://...]
 bgd_sce_tools check-framework --project <路径> [--proxy http://...]
 bgd_sce_tools check-watch --project <项目路径>       # 判断是否监听中
+bgd_sce_tools config get <键> --project <项目路径>   # 读取 bgd 配置（合并后生效值）
+bgd_sce_tools config set <键> <值> --project <路径>  # 写入 bgd.json 覆盖项
+bgd_sce_tools setting get <键>                       # 读取应用设置（proxy / watch_enabled）
+bgd_sce_tools setting set <键> <值>                  # 写入应用设置
 ```
 
-`--log <路径>` 会把过程日志同时写入文件（无 GUI 环境查看结果）；`check-watch` 通过项目 `.bgd/.watch_state.json` + PID 校验判断监听状态（该文件由 GUI 监听开关维护，已加入框架 .gitignore）。
+`--log <路径>` 会把过程日志同时写入文件（无 GUI 环境查看结果）；`check-watch` 通过项目 `.bgd/.watch_state.json` + PID 校验判断监听状态（该文件由 GUI 监听开关维护，已加入框架 .gitignore）；`config`/`setting` 子命令分别读写项目 bgd.json 覆盖项与应用设置，供 CLI 和自动化脚本使用。
 
 开发期等价命令：`cargo run -- build --project ...`（在 src-tauri/ 下）。
 

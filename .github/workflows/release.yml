@@ -54,6 +54,23 @@ jobs:
       - name: Install frontend deps
         run: pnpm install --frozen-lockfile
 
+      # 版本号唯一来源是 git tag：构建前把 tag 版本注入 tauri.conf.json 与 Cargo.toml
+      # 源码中的 version 固定为 0.0.0-dev 占位（dev 模式使用），无需手工同步
+      - name: Inject version from tag
+        shell: pwsh
+        run: |
+          $ver = "${{ github.ref_name }}".TrimStart('v')
+          Write-Output "注入版本号: $ver"
+          # tauri.conf.json
+          $conf = Get-Content src-tauri/tauri.conf.json -Raw
+          $conf = $conf -replace '"version":\s*"[^"]*"', "`"version`": `"$ver`""
+          Set-Content src-tauri/tauri.conf.json $conf -NoNewline -Encoding utf8
+          # Cargo.toml（[package] 段的 version）
+          $cargo = Get-Content src-tauri/Cargo.toml -Raw
+          $cargo = $cargo -replace '(?m)^version = "[^"]*"', "version = `"$ver`""
+          Set-Content src-tauri/Cargo.toml $cargo -NoNewline -Encoding utf8
+          Write-Output "已写入 tauri.conf.json 与 Cargo.toml"
+
       # tauri-action 会自动：构建前端 -> 构建 Tauri 应用 ->
       # 创建 GitHub Release 并上传安装包与 updater 清单（latest.json + 签名）
       - uses: tauri-apps/tauri-action@v0

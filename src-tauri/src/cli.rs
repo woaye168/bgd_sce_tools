@@ -9,7 +9,7 @@ use bgd_sce_tools_lib::{builder, config::BgdConfig, project};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-const USAGE: &str = "\
+const USAGE: &str = "
 bgd_sce_tools CLI
 
 用法: bgd_sce_tools <子命令> [选项]
@@ -21,7 +21,12 @@ bgd_sce_tools CLI
   init                   初始化项目（下载框架生成 .bgd）
   update-framework       增量更新框架（三路哈希对比）
   check-framework        检查框架是否有新版本
+  watch                  监听更新（前台阻塞，Ctrl+C 停止）
   check-watch            检查项目当前是否处于监听中
+  config get <键>        读取 bgd 配置（合并后生效值）
+  config set <键> <值>   写入 bgd.json 覆盖项（数组用 JSON 数组形式）
+  setting get <键>       读取应用设置（proxy / watch_enabled）
+  setting set <键> <值>  写入应用设置
 
 选项:
   --project <路径>        项目根目录（缺省为当前目录）
@@ -42,6 +47,8 @@ struct Cli {
     repo: String,
     force: bool,
     log_file: Option<PathBuf>,
+    /// config/setting 的子命令与键值（get/set <key> [value]）
+    extra: Vec<String>,
 }
 
 fn parse_args() -> Result<Cli> {
@@ -53,6 +60,7 @@ fn parse_args() -> Result<Cli> {
         repo: String::new(),
         force: false,
         log_file: None,
+        extra: Vec::new(),
     };
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -77,10 +85,12 @@ fn parse_args() -> Result<Cli> {
                 return Err(anyhow::anyhow!("未知选项: {s}\n\n{USAGE}"));
             }
             s => {
-                if !cli.cmd.is_empty() {
-                    return Err(anyhow::anyhow!("多余的参数: {s}\n\n{USAGE}"));
+                if cli.cmd.is_empty() {
+                    cli.cmd = s.to_string();
+                } else {
+                    // config/setting 的子命令与键值对交给 parse_kv 处理，此处收集
+                    cli.extra.push(s.to_string());
                 }
-                cli.cmd = s.to_string();
             }
         }
     }
@@ -140,14 +150,76 @@ fn load_project_config(project_root: &Path) -> Result<(PathBuf, BgdConfig)> {
     Ok((bgd_root, cfg))
 }
 
-const CMDS: [&str; 7] = [
+/// 应用配置目录（与 GUI 共用 app_config_dir 约定）
+fn app_config_dir() -> Result<PathBuf> {
+    let dir = std::env::var("APPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir())
+        .join("com.bgd.sce-tools");
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
+/// 解析 config/setting 子命令的 (sub, key, value)
+fn parse_kv(cli: &Cli, kind: &str) -> Result<(String, String, String)> {
+    let sub = cli.extra.first().cloned().unwrap_or_default();
+    let key = cli.extra.get(1).cloned().unwrap_or_default();
+    let value = cli.extra.get(2).cloned().unwrap_or_default();
+    match sub.as_str() {
+        "get" => {
+            if key.is_empty() {
+                return Err(anyhow::anyhow!("{kind} get 缺少键名"));
+            }
+        }
+        "set" => {
+            if key.is_empty() || value.is_empty() {
+                return Err(anyhow::anyhow!("{kind} set 缺少键名或值"));
+            }
+        }
+        _ => {}
+    }
+    Ok((sub, key, value))
+}
+
+/// 按字段名写入 BgdConfig（覆盖项）。字符串字段直接赋值，数组字段按 JSON 解析
+fn set_config_field(cfg: &mut BgdConfig, key: &str, value: &str) -> Result<()> {
+    fn parse_list(v: &str) -> Result<Vec<String>> {
+        serde_json::from_str(v).with_context(|| format!("数组字段需用 JSON 数组格式: {v}"))
+    }
+    match key {
+        "project_root" => cfg.project_root = value.to_string(),
+        "enable_build_log" => cfg.enable_build_log = matches!(value, "true" | "1" | "yes"),
+        "asset_target" => cfg.asset_target = value.to_string(),
+        "libs_asset_output_name" => cfg.libs_asset_output_name = value.to_string(),
+        "game_asset_output_name" => cfg.game_asset_output_name = value.to_string(),
+        "server_entrance" => cfg.server_entrance = value.to_string(),
+        "client_entrance" => cfg.client_entrance = value.to_string(),
+        "libs_dir" => cfg.libs_dir = value.to_string(),
+        "libs_server_target" => cfg.libs_server_target = value.to_string(),
+        "libs_client_target" => cfg.libs_client_target = value.to_string(),
+        "game_dir" => cfg.game_dir = value.to_string(),
+        "game_server_target" => cfg.game_server_target = value.to_string(),
+        "game_client_target" => cfg.game_client_target = value.to_string(),
+        "libs_excludes" => cfg.libs_excludes = parse_list(value)?,
+        "game_excludes" => cfg.game_excludes = parse_list(value)?,
+        "framework_version" => cfg.framework_version = value.to_string(),
+        "framework_repo" => cfg.framework_repo = value.to_string(),
+        other => return Err(anyhow::anyhow!("未知配置键: {other}")),
+    }
+    Ok(())
+}
+
+const CMDS: [&str; 10] = [
     "build",
+    "watch",
     "clean",
     "clean-logs",
     "init",
     "update-framework",
     "check-framework",
     "check-watch",
+    "config",
+    "setting",
 ];
 
 /// 是否命中 CLI 调用（供 main 决定是否 AttachConsole）
@@ -165,7 +237,7 @@ pub fn run() -> i32 {
 
     let result = (|| -> Result<()> {
         let cli = parse_args()?;
-        let logger = Logger::new(cli.log_file.as_ref(), &cli.project)?;
+        let logger = std::sync::Arc::new(Logger::new(cli.log_file.as_ref(), &cli.project)?);
         let log = |line: &str| logger.log(line);
         match cli.cmd.as_str() {
             "build" => {
@@ -216,6 +288,75 @@ pub fn run() -> i32 {
                     logger.log("监听中（保存即自动增量构建，无需手动构建）");
                 } else {
                     logger.log("未监听（修改后需执行「全量构建」或本工具 build 命令）");
+                }
+            }
+            "watch" => {
+                let (bgd_root, cfg) = load_project_config(&cli.project)?;
+                logger.log("监听已启动（前台阻塞，Ctrl+C 停止）");
+                // start_watch 需要 'static 回调，复用共享的 logger
+                let logger_arc = std::sync::Arc::clone(&logger);
+                let log = move |line: &str| logger_arc.log(line);
+                let _watcher = builder::start_watch(&bgd_root, &cfg, log)?;
+                // 前台阻塞直到 Ctrl+C
+                let running = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+                let r = running.clone();
+                ctrlc::set_handler(move || {
+                    r.store(false, std::sync::atomic::Ordering::SeqCst);
+                })
+                .context("无法注册 Ctrl+C 处理")?;
+                while running.load(std::sync::atomic::Ordering::SeqCst) {
+                    std::thread::sleep(std::time::Duration::from_millis(300));
+                }
+                logger.log("监听已停止");
+            }
+            "config" => {
+                let (bgd_root, cfg) = load_project_config(&cli.project)?;
+                let (sub, key, value) = parse_kv(&cli, "config")?;
+                match sub.as_str() {
+                    "get" => {
+                        let v = serde_json::to_value(&cfg)?;
+                        logger.log(&format!(
+                            "{}",
+                            v.get(&key).cloned().unwrap_or(serde_json::Value::Null)
+                        ));
+                    }
+                    "set" => {
+                        let mut cfg = cfg;
+                        set_config_field(&mut cfg, &key, &value)?;
+                        cfg.save(&bgd_root)?;
+                        logger.log(&format!("已写入 bgd.json: {key} = {value}"));
+                    }
+                    other => return Err(anyhow::anyhow!("未知 config 子命令: {other}（get/set）")),
+                }
+            }
+            "setting" => {
+                let dir = app_config_dir()?;
+                let (sub, key, value) = parse_kv(&cli, "setting")?;
+                let mut settings = project::load_settings(&dir);
+                match sub.as_str() {
+                    "get" => {
+                        let v = serde_json::to_value(&settings)?;
+                        logger.log(&format!(
+                            "{}",
+                            v.get(&key).cloned().unwrap_or(serde_json::Value::Null)
+                        ));
+                    }
+                    "set" => {
+                        match key.as_str() {
+                            "proxy" => settings.proxy = value.clone(),
+                            "watch_enabled" => {
+                                settings.watch_enabled = matches!(value.as_str(), "true" | "1" | "yes")
+                            }
+                            other => {
+                                return Err(anyhow::anyhow!(
+                                    "未知设置键: {other}（可用: proxy / watch_enabled）"
+                                ))
+                            }
+                        }
+                        project::save_settings(&dir, &settings)?;
+                        logger.log(&format!("已写入应用设置: {key} = {value}"));
+                    }
+                    other => return Err(anyhow::anyhow!("未知 setting 子命令: {other}（get/set）")),
                 }
             }
             _ => unreachable!(),
