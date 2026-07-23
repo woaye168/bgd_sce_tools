@@ -259,7 +259,15 @@ pub fn init_project(project_root: &Path, repo: &str, proxy: &str, force: bool, l
 
     if dest_bgd.exists() {
         let backup = project_root.join(format!(".bgd.bak-{}", now_ts()));
-        fs::rename(&dest_bgd, &backup)?;
+        fs::rename(&dest_bgd, &backup).map_err(|e| {
+            if e.raw_os_error() == Some(5) {
+                anyhow!(
+                    ".bgd 目录被占用无法重命名（拒绝访问）。请确认：1) 已停止本工具监听；2) 星火编辑器未打开该项目；3) 没有终端的当前目录在 .bgd 内。原始错误: {e}"
+                )
+            } else {
+                anyhow!(e)
+            }
+        })?;
         log(&format!(".bgd 已存在，已备份为 {}", backup.display()));
     }
 

@@ -266,6 +266,14 @@ fn is_watching(state: State<AppState>) -> bool {
 #[tauri::command]
 fn init_project(app: AppHandle, state: State<AppState>, path: String, repo: String, force: bool) -> Result<String, String> {
     let root = PathBuf::from(&path);
+    // force 重新初始化前先停掉当前监听（notify watcher 监视 .bgd/libs 与 .bgd/src，
+    // 不停掉会导致重命名/删除 .bgd 时 os error 5 拒绝访问）
+    {
+        let mut guard = state.watcher.lock().map_err(|e| e.to_string())?;
+        if guard.take().is_some() {
+            emit_log(&app, "build", "[init] 已停止当前监听（重新初始化需要）");
+        }
+    }
     let log = |line: &str| emit_log(&app, "build", line);
     let proxy = load_proxy(&app);
     let msg = project::init_project(&root, &repo, &proxy, force, &log).map_err(|e| e.to_string())?;
