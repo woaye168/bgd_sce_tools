@@ -35,7 +35,20 @@ export default function LogPanel({ source, className = "" }: LogPanelProps) {
       {lines.length === 0 ? (
         <span className="text-slate-500">暂无日志输出</span>
       ) : (
-        lines.map((line, i) => <div key={i}>{line}</div>)
+        lines.map((line, i) => (
+          <div
+            key={i}
+            className={
+              line.includes("[warn]")
+                ? "text-amber-400"
+                : line.includes("[error]")
+                  ? "text-red-400"
+                  : undefined
+            }
+          >
+            {line}
+          </div>
+        ))
       )}
       <div ref={bottomRef} />
     </div>

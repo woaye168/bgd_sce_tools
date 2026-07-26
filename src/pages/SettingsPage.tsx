@@ -105,6 +105,41 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-5">
+      <Card title="日志设置">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-slate-700 dark:text-slate-200">保存到本地</p>
+            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+              构建/监听日志写入 .bgd/log/build-YYYY-MM-DD.log，按天滚动
+            </p>
+          </div>
+          <button
+            onClick={async () => {
+              const next = { ...appSettings, save_log: !appSettings.save_log };
+              setAppSettings(next);
+              try {
+                await api.saveAppSettings(next);
+                setSettingsMsg(next.save_log ? "✔ 日志保存已开启" : "✔ 日志保存已关闭");
+              } catch (e) {
+                setSettingsMsg(`✘ 保存失败: ${String(e)}`);
+              }
+            }}
+            className={`relative h-6 w-11 rounded-full transition-colors ${
+              appSettings.save_log ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-600"
+            }`}
+          >
+            <span
+              className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                appSettings.save_log ? "translate-x-5" : "translate-x-0.5"
+              }`}
+            />
+          </button>
+        </div>
+        {settingsMsg && (
+          <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{settingsMsg}</p>
+        )}
+      </Card>
+
       <Card title="通用设置">
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">
@@ -120,17 +155,6 @@ export default function SettingsPage() {
             className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm text-slate-700 dark:border-slate-600 dark:text-slate-200"
           />
         </label>
-        <label className="mt-3 flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={appSettings.save_log}
-            onChange={(e) => setAppSettings((prev) => ({ ...prev, save_log: e.target.checked }))}
-            className="rounded border-slate-300 dark:border-slate-600"
-          />
-          <span className="text-sm text-slate-600 dark:text-slate-300">
-            保存日志文件（构建/监听日志写入 .bgd/log/build-YYYY-MM-DD.log，按天滚动）
-          </span>
-        </label>
         <button
           onClick={saveAppSettings}
           disabled={busy}
@@ -138,9 +162,6 @@ export default function SettingsPage() {
         >
           保存
         </button>
-        {settingsMsg && (
-          <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{settingsMsg}</p>
-        )}
       </Card>
 
       {!config && (
