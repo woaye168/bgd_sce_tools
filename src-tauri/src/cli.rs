@@ -189,9 +189,6 @@ fn set_config_field(cfg: &mut BgdConfig, key: &str, value: &str) -> Result<()> {
     match key {
         "project_root" => cfg.project_root = value.to_string(),
         "enable_build_log" => cfg.enable_build_log = matches!(value, "true" | "1" | "yes"),
-        "asset_target" => cfg.asset_target = value.to_string(),
-        "libs_asset_output_name" => cfg.libs_asset_output_name = value.to_string(),
-        "game_asset_output_name" => cfg.game_asset_output_name = value.to_string(),
         "server_entrance" => cfg.server_entrance = value.to_string(),
         "client_entrance" => cfg.client_entrance = value.to_string(),
         "libs_dir" => cfg.libs_dir = value.to_string(),

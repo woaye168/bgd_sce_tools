@@ -44,6 +44,8 @@ export interface AppSettings {
   proxy: string;
   /** 监听开关状态（持久化，启动时自动恢复） */
   watch_enabled: boolean;
+  /** 保存日志文件开关（构建/监听日志写入 .bgd/log/build-YYYY-MM-DD.log） */
+  save_log: boolean;
 }
 
 /** 框架增量更新报告 */

@@ -156,44 +156,117 @@ pub fn rewrite_lua(content: &str, side: &str, cfg: &BgdConfig) -> String {
 
 /// res 资源路径替换：把 'libs/res/<类型>/...' 或 'src/res/<类型>/...' 替换为运行时路径
 /// 规则：sound 去掉 .ogg 扩展名；sprites 前缀 @<ProjectName>
-fn rewrite_res_paths(content: &str, bgd_root: &Path, _cfg: &BgdConfig) -> String {
+/// res 资源路径替换：把 'libs/res/<类型>/...' 或 'src/res/<类型>/...' 替换为运行时路径
+/// 规则：各类型固定扩展名 + 资源存在性/格式检查（黄色警告）
+fn rewrite_res_paths(content: &str, bgd_root: &Path, _cfg: &BgdConfig, log: &LogFn) -> String {
     let project_name = read_project_name(bgd_root).unwrap_or_else(|_| "unknown".to_string());
+    let project_root = bgd_root.parent().unwrap_or(bgd_root);
     let mut result = content.to_string();
+    let mut warnings: Vec<String> = Vec::new();
 
     for code_set in ["libs", "src"] {
         for res_type in ["image", "particle", "sound", "spine", "sprites"] {
-            let pattern = format!("{code_set}/res/{res_type}/");
-            let replacement = res_runtime_prefix(code_set, res_type, &project_name);
-            // 匹配字符串字面量里的路径前缀（'libs/res/image/...' 或 "src/res/sound/..."）
-            let re = Regex::new(&format!(r#"['"]{pattern}"#)).unwrap();
+            let pattern = format!(r#"['"]({code_set}/res/{res_type}/[^'"]+)['"]"#);
+            let re = Regex::new(&pattern).unwrap();
             result = re
                 .replace_all(&result, |caps: &Captures| {
-                    let quote = &caps[0][..1]; // ' 或 "
-                    format!("{quote}{replacement}")
+                    let full_path = &caps[1]; // libs/res/image/armor_dark.png
+                    let rel_path = full_path
+                        .trim_start_matches(&format!("{code_set}/res/{res_type}/"));
+                    let (new_path, warn) = rewrite_single_res_path(
+                        code_set, res_type, rel_path, &project_name, project_root,
+                    );
+                    if let Some(w) = warn {
+                        warnings.push(w);
+                    }
+                    format!("'{new_path}'")
                 })
                 .into_owned();
         }
     }
 
-    // sound 特殊：去掉 .ogg 扩展名（保留原引号）
-    let re_sound = Regex::new(r#"(['"])(res/sound/bgd_(libs|game)_client/[^'"]+)\.ogg(['"])"#).unwrap();
-    result = re_sound
-        .replace_all(&result, |caps: &Captures| format!("{}{}{}", &caps[1], &caps[2], &caps[1]))
-        .into_owned();
+    // 输出黄色警告（构建日志流）
+    for w in warnings {
+        log(&format!("[warn] {w}"));
+    }
 
     result
 }
 
-/// res 运行时路径前缀（不含文件名）
-fn res_runtime_prefix(code_set: &str, res_type: &str, project_name: &str) -> String {
+/// 重写单个 res 路径，返回 (新路径, 可选警告)
+fn rewrite_single_res_path(
+    code_set: &str,
+    res_type: &str,
+    rel_path: &str,
+    project_name: &str,
+    project_root: &Path,
+) -> (String, Option<String>) {
     let prefix = if code_set == "libs" { "bgd_libs_client" } else { "bgd_game_client" };
+    let base = project_root.join(".bgd").join(code_set).join("res").join(res_type);
+
     match res_type {
-        "image" => format!("ui/image/image/{prefix}/"),
-        "particle" => format!("res/effect/{prefix}/"),
-        "sound" => format!("res/sound/{prefix}/"),
-        "spine" => format!("ui/spine/{prefix}/"),
-        "sprites" => format!("@{project_name}/image/sprites/{prefix}/"),
-        _ => String::new(),
+        "image" => {
+            let name = rel_path.trim_end_matches(".png");
+            let file = base.join(format!("{name}.png"));
+            let warn = if !file.exists() {
+                Some(format!("资源不存在: {code_set}/res/image/{rel_path}（期望 .png）"))
+            } else {
+                None
+            };
+            (format!("image/image/{prefix}/{name}.png"), warn)
+        }
+        "particle" => {
+            let name = rel_path.trim_end_matches(".effect");
+            let file = base.join(format!("{name}.effect"));
+            let warn = if !file.exists() {
+                Some(format!("资源不存在: {code_set}/res/particle/{rel_path}（期望 .effect）"))
+            } else {
+                None
+            };
+            (format!("res/effect/{prefix}/{name}.effect"), warn)
+        }
+        "sound" => {
+            let name = rel_path.trim_end_matches(".ogg");
+            let file = base.join(format!("{name}.ogg"));
+            let warn = if !file.exists() {
+                Some(format!("资源不存在: {code_set}/res/sound/{rel_path}（期望 .ogg）"))
+            } else {
+                None
+            };
+            (format!("res/sound/{prefix}/{name}"), warn)
+        }
+        "spine" => {
+            let name = rel_path.trim_end_matches(".skel");
+            let file = base.join(format!("{name}.skel"));
+            let warn = if !file.exists() {
+                Some(format!("资源不存在: {code_set}/res/spine/{rel_path}（期望 .skel）"))
+            } else {
+                None
+            };
+            (format!("spine/{prefix}/{name}"), warn)
+        }
+        "sprites" => {
+            // sprites：目录无扩展名，文件保留扩展名
+            let path = base.join(rel_path);
+            let (name, ext) = if path.is_dir() {
+                (rel_path.to_string(), String::new())
+            } else {
+                match path.extension() {
+                    Some(e) => (
+                        rel_path.trim_end_matches(&format!(".{}", e.to_string_lossy())).to_string(),
+                        format!(".{}", e.to_string_lossy()),
+                    ),
+                    None => (rel_path.to_string(), String::new()),
+                }
+            };
+            let warn = if !path.exists() {
+                Some(format!("资源不存在: {code_set}/res/sprites/{rel_path}"))
+            } else {
+                None
+            };
+            (format!("@{project_name}/image/sprites/{prefix}/{name}{ext}"), warn)
+        }
+        _ => (rel_path.to_string(), None),
     }
 }
 
@@ -207,7 +280,7 @@ fn ext_of(path: &Path) -> String {
 }
 
 /// 单文件复制：lua 改写模块名；html/css/js 包装为 lua 字符串模块；其余二进制原样
-fn transform_and_write(src: &Path, dest: &Path, side: &str, cfg: &BgdConfig, bgd_root: &Path) -> Result<bool> {
+fn transform_and_write(src: &Path, dest: &Path, side: &str, cfg: &BgdConfig, bgd_root: &Path, log: &LogFn) -> Result<bool> {
     let ext = ext_of(src);
     let dest = if TEXT_EXTS.contains(&ext.as_str()) && ext != "lua" {
         dest.with_extension("lua")
@@ -224,7 +297,7 @@ fn transform_and_write(src: &Path, dest: &Path, side: &str, cfg: &BgdConfig, bgd
             .with_context(|| format!("无法读取源文件: {}", src.display()))?;
         let content = if ext == "lua" {
             let content = rewrite_lua(&content, side, cfg);
-            rewrite_res_paths(&content, bgd_root, cfg)
+            rewrite_res_paths(&content, bgd_root, cfg, log)
         } else {
             format!("return [===[{content}]===]")
         };
@@ -306,7 +379,7 @@ pub fn build_one_file(
     let mut count = 0;
     for side in sides_for(&rel) {
         let dest = dest_for(&rel, side, code_set, bgd_root, cfg);
-        if transform_and_write(src_abs, &dest, side, cfg, bgd_root)? {
+        if transform_and_write(src_abs, &dest, side, cfg, bgd_root, log)? {
             log(&format!("[ok] {side}: [{code_set}] {rel}"));
             count += 1;
         }

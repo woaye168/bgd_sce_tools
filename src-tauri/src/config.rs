@@ -16,13 +16,6 @@ pub struct BgdConfig {
     pub enable_build_log: bool,
 
     #[serde(default)]
-    pub asset_target: String,
-    #[serde(default)]
-    pub libs_asset_output_name: String,
-    #[serde(default)]
-    pub game_asset_output_name: String,
-
-    #[serde(default)]
     pub server_entrance: String,
     #[serde(default)]
     pub client_entrance: String,

@@ -5,6 +5,7 @@ pub mod config;
 pub mod project;
 
 use config::BgdConfig;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -35,6 +36,44 @@ fn emit_log(app: &AppHandle, source: &str, line: &str) {
     );
 }
 
+/// 写日志文件（按天滚动：.bgd/log/build-YYYY-MM-DD.log）
+fn write_log_file(bgd_root: &Path, line: &str) {
+    let log_dir = bgd_root.join("log");
+    let _ = fs::create_dir_all(&log_dir);
+    let date = format_date(std::time::SystemTime::now());
+    let path = log_dir.join(format!("build-{date}.log"));
+    use std::io::Write;
+    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(f, "{}", line);
+    }
+}
+
+/// 格式化 SystemTime 为 YYYY-MM-DD（UTC+8）
+fn format_date(t: std::time::SystemTime) -> String {
+    let secs = t
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+        + 8 * 3600; // UTC+8
+    let days = secs / 86400;
+    let (y, m, d) = civil_from_days(days);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// days since epoch -> (year, month, day)，公历算法
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
 fn load_cfg(bgd_root: &Path) -> Result<BgdConfig, String> {
     BgdConfig::load(bgd_root).map_err(|e| e.to_string())
 }
@@ -53,7 +92,16 @@ fn try_start_watch(app: &AppHandle, state: &AppState) -> Result<(), String> {
             let _ = guard.take();
         }
         let app_clone = app.clone();
-        let log = move |line: &str| emit_log(&app_clone, "watch", line);
+        let save_log = app_data_dir(&app)
+            .map(|d| project::load_settings(&d).save_log)
+            .unwrap_or(false);
+        let bgd_root_clone = bgd_root.clone();
+        let log = move |line: &str| {
+            emit_log(&app_clone, "watch", line);
+            if save_log {
+                write_log_file(&bgd_root_clone, line);
+            }
+        };
         let watcher = builder::start_watch(&bgd_root, &cfg, log).map_err(|e| e.to_string())?;
         *guard = Some(watcher);
     }
@@ -199,7 +247,15 @@ fn save_config(state: State<AppState>, config: BgdConfig) -> Result<(), String> 
 fn full_build(app: AppHandle, state: State<AppState>) -> Result<(), String> {
     let bgd_root = state.bgd_root()?;
     let cfg = load_cfg(&bgd_root)?;
-    let log = |line: &str| emit_log(&app, "build", line);
+    let save_log = app_data_dir(&app)
+        .map(|d| project::load_settings(&d).save_log)
+        .unwrap_or(false);
+    let log = |line: &str| {
+        emit_log(&app, "build", line);
+        if save_log {
+            write_log_file(&bgd_root, line);
+        }
+    };
     builder::build_all(&bgd_root, &cfg, &log).map_err(|e| e.to_string())
 }
 
@@ -207,7 +263,15 @@ fn full_build(app: AppHandle, state: State<AppState>) -> Result<(), String> {
 fn clean_build(app: AppHandle, state: State<AppState>) -> Result<(), String> {
     let bgd_root = state.bgd_root()?;
     let cfg = load_cfg(&bgd_root)?;
-    let log = |line: &str| emit_log(&app, "build", line);
+    let save_log = app_data_dir(&app)
+        .map(|d| project::load_settings(&d).save_log)
+        .unwrap_or(false);
+    let log = |line: &str| {
+        emit_log(&app, "build", line);
+        if save_log {
+            write_log_file(&bgd_root, line);
+        }
+    };
     builder::clean(&bgd_root, &cfg, &log).map_err(|e| e.to_string())
 }
 

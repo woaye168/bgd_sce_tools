@@ -21,6 +21,9 @@ pub struct AppSettings {
     /// 监听开关状态（持久化，启动时自动恢复）
     #[serde(default)]
     pub watch_enabled: bool,
+    /// 保存日志文件开关（开启后构建/监听日志写到 .bgd/log/build-YYYY-MM-DD.log）
+    #[serde(default)]
+    pub save_log: bool,
 }
 
 pub fn load_settings(app_data_dir: &Path) -> AppSettings {
