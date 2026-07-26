@@ -92,12 +92,13 @@ fn try_start_watch(app: &AppHandle, state: &AppState) -> Result<(), String> {
             let _ = guard.take();
         }
         let app_clone = app.clone();
-        let save_log = app_data_dir(&app)
-            .map(|d| project::load_settings(&d).save_log)
-            .unwrap_or(false);
         let bgd_root_clone = bgd_root.clone();
         let log = move |line: &str| {
             emit_log(&app_clone, "watch", line);
+            // 每次写日志时动态读 save_log（开关改了立即生效）
+            let save_log = app_data_dir(&app_clone)
+                .map(|d| project::load_settings(&d).save_log)
+                .unwrap_or(false);
             if save_log {
                 write_log_file(&bgd_root_clone, line);
             }

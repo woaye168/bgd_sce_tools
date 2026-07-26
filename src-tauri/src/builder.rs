@@ -777,7 +777,30 @@ pub fn clean(bgd_root: &Path, cfg: &BgdConfig, log: &LogFn) -> Result<()> {
     }
     restore_entrance("server", bgd_root, cfg, log)?;
     restore_entrance("client", bgd_root, cfg, log)?;
+    clean_res_files(bgd_root, log)?;
     log("===== 清理完成 =====");
+    Ok(())
+}
+
+/// 清除同步到引擎目录的资源文件（ui/image/、res/effect/ 等下的 bgd_* 目录）
+fn clean_res_files(bgd_root: &Path, log: &LogFn) -> Result<()> {
+    let project_root = bgd_root.parent().unwrap_or(bgd_root);
+    for code_set in ["libs", "game"] {
+        let prefix = if code_set == "libs" { "bgd_libs_client" } else { "bgd_game_client" };
+        for sub in [
+            format!("ui/image/image/{prefix}"),
+            format!("res/effect/{prefix}"),
+            format!("res/sound/{prefix}"),
+            format!("ui/spine/{prefix}"),
+            format!("ui/image/sprites/{prefix}"),
+        ] {
+            let path = project_root.join(&sub);
+            if path.is_dir() {
+                fs::remove_dir_all(&path)?;
+                log(&format!("  -> 已删除资源 {sub}"));
+            }
+        }
+    }
     Ok(())
 }
 
