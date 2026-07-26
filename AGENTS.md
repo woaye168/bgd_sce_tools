@@ -78,8 +78,8 @@ src-tauri/src/
 ## 关键机制（改代码前必读）
 
 - **静态 require 改写**：源码写真实路径（`require('src.xxx')`），构建时引号内前缀改写为运行时根名（`bgd_game_server.` 等）。**禁止**恢复字符串拼接构造 require 路径。
-- **白名单构建**：code set 根下仅 `server/client/common/asset/entrance/res` 进产物；根级文件（init.lua、bgd_default.json、.emmyrc.json、.gitignore、doc/）各有专门流程。
-- **资源系统**：`res/` 目录五类资源（image/particle/sound/spine/sprites）同步到引擎目录；`res/*.lua` 声明文件生成 `bgd_res_manifest.lua` 清单（sprites 前缀 `@<ProjectName>` 从 map_settings.json 注入）；运行时 `bgd_api.res(libs.res.image.xxx)` 查清单返回路径。
+- **白名单构建**：code set 根下仅 `server/client/common/res/entrance` 进产物；根级文件（init.lua、bgd_default.json、.emmyrc.json、.gitignore、doc/）各有专门流程。
+- **资源系统**：`res/` 目录五类资源（image/particle/sound/spine/sprites）同步到引擎目录；`.lua` 中字符串字面量 `'libs/res/<类型>/...'` / `'src/res/<类型>/...'` 在构建时替换为运行时路径（sound 去 `.ogg` 扩展名，sprites 前缀 `@<ProjectName>` 从 map_settings.json 注入）。
 - **入口合并分界标记**：`src/main.lua` 标记之前为编辑器原文永久保留；之后为合并产物。原文若仍含标记（脏数据）则丢弃重建（自愈）。
 - **配置 overlay**：`libs/bgd_default.json`（框架下发）逐 key 被 `.bgd/bgd.json`（项目覆盖）覆盖；保存只写差异。
 - **三路哈希增量更新**：基准存 `.bgd/.framework_state.json`；冲突时本地保留 + 新版另存 `.framework-new`。文本文件统一 LF 后哈希（防 CRLF 误报）。
