@@ -26,7 +26,7 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
 ctrlc = "3"
 anyhow = "1"
-bgd_sce_tools_sdk = { path = "../sdk" }
+bgd_sce_tools_sdk = "0.1"
 libloading = "0.8"
 thiserror = "1"
 

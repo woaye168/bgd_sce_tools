@@ -130,6 +130,8 @@ dependencies = [
 [[package]]
 name = "bgd_sce_tools_sdk"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "889393b054c88bd9cf8bd4d00b9b38765bf66e56e891db162f29f62f5c7c9ff0"
 dependencies = [
  "serde",
  "serde_json",
