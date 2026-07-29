@@ -125,3 +125,17 @@ impl BgdConfig {
         out
     }
 }
+
+impl From<BgdConfig> for bgd_sce_tools_sdk::BgdConfig {
+    fn from(cfg: BgdConfig) -> Self {
+        serde_json::from_value(serde_json::to_value(cfg).expect("BgdConfig 序列化失败"))
+            .expect("BgdConfig 转换失败")
+    }
+}
+
+impl From<&BgdConfig> for bgd_sce_tools_sdk::BgdConfig {
+    fn from(cfg: &BgdConfig) -> Self {
+        serde_json::from_value(serde_json::to_value(cfg).expect("BgdConfig 序列化失败"))
+            .expect("BgdConfig 转换失败")
+    }
+}

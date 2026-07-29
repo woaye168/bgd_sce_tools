@@ -150,6 +150,30 @@ fn load_project_config(project_root: &Path) -> Result<(PathBuf, BgdConfig)> {
     Ok((bgd_root, cfg))
 }
 
+/// 加载项目插件（CLI 环境）
+fn load_plugins(project_root: &Path, log: &dyn Fn(&str)) -> Option<bgd_sce_tools_lib::plugin::loader::PluginLoader> {
+    let plugins_dir = project_root.join(".bgd").join("plugins");
+    if !plugins_dir.is_dir() {
+        return None;
+    }
+    let mut loader = bgd_sce_tools_lib::plugin::loader::PluginLoader::new();
+    match loader.load_dir(&plugins_dir) {
+        Ok(()) => {
+            let count = loader.plugins.len();
+            if count > 0 {
+                log(&format!("[plugin] 已加载 {count} 个插件"));
+                Some(loader)
+            } else {
+                None
+            }
+        }
+        Err(e) => {
+            log(&format!("[plugin] 加载失败: {e}"));
+            None
+        }
+    }
+}
+
 /// 应用配置目录（与 GUI 共用 app_config_dir 约定）
 fn app_config_dir() -> Result<PathBuf> {
     let dir = std::env::var("APPDATA")
@@ -239,7 +263,15 @@ pub fn run() -> i32 {
         match cli.cmd.as_str() {
             "build" => {
                 let (bgd_root, cfg) = load_project_config(&cli.project)?;
-                builder::build_all(&bgd_root, &cfg, &log)?;
+                let plugin_loader = load_plugins(&cli.project, &log);
+                let hook = |ctx: &bgd_sce_tools_sdk::BuildContext| -> anyhow::Result<()> {
+                    if let Some(loader) = &plugin_loader {
+                        bgd_sce_tools_lib::plugin::hook_runner::run_after_build(loader, ctx)
+                            .map_err(|e| anyhow::anyhow!("插件钩子失败: {e}"))?;
+                    }
+                    Ok(())
+                };
+                builder::build_all_with_hook(&bgd_root, &cfg, &log, Some(&hook))?;
             }
             "clean" => {
                 let (bgd_root, cfg) = load_project_config(&cli.project)?;

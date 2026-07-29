@@ -744,6 +744,16 @@ pub fn build_code_set(code_set: &str, bgd_root: &Path, cfg: &BgdConfig, log: &Lo
 }
 
 pub fn build_all(bgd_root: &Path, cfg: &BgdConfig, log: &LogFn) -> Result<()> {
+    build_all_with_hook(bgd_root, cfg, log, None)
+}
+
+/// 全量构建（带构建后钩子）
+pub fn build_all_with_hook(
+    bgd_root: &Path,
+    cfg: &BgdConfig,
+    log: &LogFn,
+    after_build_hook: Option<&dyn Fn(&bgd_sce_tools_sdk::BuildContext) -> Result<()>>,
+) -> Result<()> {
     log("===== 开始全量构建 =====");
     regen_api_aggregations(bgd_root, cfg, log)?;
     let libs_count = build_code_set("libs", bgd_root, cfg, log)?;
@@ -753,6 +763,14 @@ pub fn build_all(bgd_root: &Path, cfg: &BgdConfig, log: &LogFn) -> Result<()> {
     update_entrance("client", bgd_root, cfg, log)?;
     merge_emmyrc(bgd_root, cfg, log)?;
     merge_gitignore(bgd_root, cfg, log)?;
+    if let Some(hook) = after_build_hook {
+        let ctx = bgd_sce_tools_sdk::BuildContext {
+            bgd_root: bgd_root.to_path_buf(),
+            config: bgd_sce_tools_sdk::BgdConfig::from(cfg),
+            log: None,
+        };
+        hook(&ctx)?;
+    }
     log(&format!(
         "===== 构建完成！框架文件: {libs_count}，游戏文件: {game_count} ====="
     ));

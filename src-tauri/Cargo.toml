@@ -26,6 +26,9 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
 ctrlc = "3"
 anyhow = "1"
+bgd_sce_tools_sdk = { path = "../sdk" }
+libloading = "0.8"
+thiserror = "1"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_System_Console"] }

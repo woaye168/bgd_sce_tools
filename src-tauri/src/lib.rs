@@ -2,6 +2,7 @@
 
 pub mod builder;
 pub mod config;
+pub mod plugin;
 pub mod project;
 
 use config::BgdConfig;

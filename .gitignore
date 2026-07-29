@@ -5,6 +5,8 @@ dist/
 # Rust
 src-tauri/target/
 src-tauri/gen/
+sdk/target/
+plugins/**/target/
 
 # 系统
 Thumbs.db
