@@ -6,7 +6,10 @@ import type {
   BgdConfig,
   FrameworkUpdateInfo,
   LogEvent,
+  PluginInfo,
+  PluginInstallProgress,
   ProjectInfo,
+  RegistryEntry,
   UpdateReport,
 } from "./types";
 
@@ -37,6 +40,19 @@ export const api = {
   getAppSettings: () => invoke<AppSettings>("get_app_settings"),
   saveAppSettings: (settings: AppSettings) =>
     invoke<void>("save_app_settings", { settings }),
+
+  getPluginRegistries: () => invoke<string[]>("get_plugin_registries"),
+  savePluginRegistries: (registries: string[]) =>
+    invoke<void>("save_plugin_registries", { registries }),
+  getInstalledPlugins: () => invoke<PluginInfo[]>("get_installed_plugins"),
+  enablePlugin: (id: string, enabled: boolean) =>
+    invoke<void>("enable_plugin", { id, enabled }),
+  uninstallPlugin: (id: string) => invoke<void>("uninstall_plugin", { id }),
+  fetchPluginRegistry: (url: string) =>
+    invoke<RegistryEntry[]>("fetch_plugin_registry", { url }),
+  installPlugin: (entry: RegistryEntry) =>
+    invoke<void>("install_plugin", { entry }),
+  restartApp: () => invoke<void>("restart_app"),
 };
 
 /** 订阅后端日志事件（build / watch 共用通道） */
@@ -44,4 +60,13 @@ export function onLog(
   callback: (event: LogEvent) => void
 ): Promise<UnlistenFn> {
   return listen<LogEvent>("bgd-log", (e) => callback(e.payload));
+}
+
+/** 订阅插件下载进度事件 */
+export function onPluginInstallProgress(
+  callback: (event: PluginInstallProgress) => void
+): Promise<UnlistenFn> {
+  return listen<PluginInstallProgress>("plugin-install-progress", (e) =>
+    callback(e.payload)
+  );
 }

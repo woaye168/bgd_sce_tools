@@ -3,6 +3,7 @@ import Sidebar from "./components/Sidebar";
 import ProjectPage from "./pages/ProjectPage";
 import BuildPage from "./pages/BuildPage";
 import WatchPage from "./pages/WatchPage";
+import PluginPage from "./pages/PluginPage";
 import SettingsPage from "./pages/SettingsPage";
 import AboutPage from "./pages/AboutPage";
 import type { PageKey } from "./lib/types";
@@ -40,6 +41,7 @@ export default function App() {
         {page === "project" && <ProjectPage onProjectChanged={onProjectChanged} />}
         {page === "build" && <BuildPage />}
         {page === "watch" && <WatchPage />}
+        {page === "plugins" && <PluginPage />}
         {page === "settings" && <SettingsPage key={projectStamp} />}
         {page === "about" && <AboutPage />}
       </main>

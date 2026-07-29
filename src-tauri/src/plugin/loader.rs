@@ -22,6 +22,7 @@ pub enum PluginLoadError {
 
 /// 已加载的插件（trait 对象 + 动态库句柄）
 pub struct LoadedPlugin {
+    pub id: String,
     pub name: String,
     pub version: String,
     pub path: PathBuf,
@@ -29,6 +30,8 @@ pub struct LoadedPlugin {
     pub build_hook: Option<Box<dyn BuildHook>>,
     pub ui_hook: Option<Box<dyn UiHook>>,
     pub settings_hook: Option<Box<dyn SettingsHook>>,
+    /// CLI 执行函数（可选）
+    pub cli_execute: Option<Box<dyn Fn(Vec<String>) -> Result<String, String> + Send + Sync>>,
     /// 动态库句柄：保持库在插件对象存活期间不被卸载
     #[allow(dead_code)]
     lib: Library,
@@ -37,12 +40,14 @@ pub struct LoadedPlugin {
 impl std::fmt::Debug for LoadedPlugin {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LoadedPlugin")
+            .field("id", &self.id)
             .field("name", &self.name)
             .field("version", &self.version)
             .field("path", &self.path)
             .field("has_build_hook", &self.build_hook.is_some())
             .field("has_ui_hook", &self.ui_hook.is_some())
             .field("has_settings_hook", &self.settings_hook.is_some())
+            .field("has_cli_execute", &self.cli_execute.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -118,7 +123,38 @@ impl PluginLoader {
         let settings_hook =
             unsafe { optional_hook::<dyn SettingsHook>(&lib, b"plugin_create_settings_hook") };
 
+        // CLI 执行函数（可选符号 plugin_cli_execute）
+        let cli_execute: Option<Box<dyn Fn(Vec<String>) -> Result<String, String> + Send + Sync>> = unsafe {
+            let sym: Result<Symbol<unsafe extern "C" fn(*const std::ffi::c_char) -> *mut std::ffi::c_char>, _> = lib.get(b"plugin_cli_execute");
+            match sym {
+                Ok(f) => {
+                    let f = f.into_raw();
+                    Some(Box::new(move |args: Vec<String>| {
+                        let json = serde_json::to_string(&args).unwrap_or_default();
+                        let c_json = std::ffi::CString::new(json).map_err(|e| e.to_string())?;
+                        let ptr = f(c_json.as_ptr());
+                        if ptr.is_null() {
+                            return Err("plugin_cli_execute returned null".to_string());
+                        }
+                        let c_str = std::ffi::CStr::from_ptr(ptr);
+                        let result = c_str.to_string_lossy().into_owned();
+                        let _ = std::ffi::CString::from_raw(ptr);
+                        Ok(result)
+                    }) as Box<dyn Fn(Vec<String>) -> Result<String, String> + Send + Sync>)
+                }
+                Err(_) => None,
+            }
+        };
+
+        // 从文件名提取插件 id（如 visual_injector.dll → visual-injector）
+        let id = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown")
+            .replace('_', "-");
+
         let loaded = LoadedPlugin {
+            id,
             name: plugin.name().to_string(),
             version: plugin.version().to_string(),
             path: path.to_path_buf(),
@@ -126,6 +162,7 @@ impl PluginLoader {
             build_hook,
             ui_hook,
             settings_hook,
+            cli_execute,
             lib,
         };
         self.plugins.push(loaded);

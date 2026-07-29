@@ -11,6 +11,7 @@ const NAV_ITEMS: { key: PageKey; label: string }[] = [
   { key: "project", label: "项目" },
   { key: "build", label: "构建" },
   { key: "watch", label: "监听" },
+  { key: "plugins", label: "插件" },
   { key: "settings", label: "设置" },
   { key: "about", label: "关于" },
 ];

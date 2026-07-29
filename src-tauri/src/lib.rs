@@ -382,6 +382,176 @@ fn update_framework(app: AppHandle, state: State<AppState>) -> Result<project::U
     project::update_framework(&project_root, &cfg.framework_repo, &proxy, &log).map_err(|e| e.to_string())
 }
 
+// ---------------------------------------------------------------- 插件命令
+
+/// 已安装插件信息（扫描 .bgd/plugins 下的 .dll + 同名 .json 元数据）
+#[derive(Debug, Clone, serde::Serialize)]
+struct PluginInfo {
+    id: String,
+    name: String,
+    version: String,
+    description: String,
+    author: String,
+    path: String,
+    enabled: bool,
+}
+
+fn plugins_dir(state: &AppState) -> Result<PathBuf, String> {
+    Ok(state.bgd_root()?.join("plugins"))
+}
+
+#[tauri::command]
+fn get_plugin_registries(app: AppHandle) -> Result<Vec<String>, String> {
+    Ok(project::load_settings(&app_data_dir(&app)?).plugin_registries)
+}
+
+#[tauri::command]
+fn save_plugin_registries(app: AppHandle, registries: Vec<String>) -> Result<(), String> {
+    let dir = app_data_dir(&app)?;
+    let mut settings = project::load_settings(&dir);
+    settings.plugin_registries = registries;
+    project::save_settings(&dir, &settings).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_installed_plugins(app: AppHandle, state: State<AppState>) -> Result<Vec<PluginInfo>, String> {
+    let dir = plugins_dir(&state)?;
+    let settings = project::load_settings(&app_data_dir(&app)?);
+    let mut list = Vec::new();
+    if dir.is_dir() {
+        for entry in fs::read_dir(&dir).map_err(|e| e.to_string())? {
+            let path = entry.map_err(|e| e.to_string())?.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("dll") {
+                continue;
+            }
+            let id = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or_default()
+                .to_string();
+            // 同名 .json 元数据（安装时写入；缺失时回退为 id）
+            let meta_path = dir.join(format!("{id}.json"));
+            let meta: serde_json::Value = fs::read_to_string(&meta_path)
+                .ok()
+                .and_then(|t| serde_json::from_str(&t).ok())
+                .unwrap_or_else(|| serde_json::json!({}));
+            let field = |key: &str| {
+                meta.get(key)
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or(if key == "name" { &id } else { "" })
+                    .to_string()
+            };
+            list.push(PluginInfo {
+                id: id.clone(),
+                name: field("name"),
+                version: field("version"),
+                description: field("description"),
+                author: field("author"),
+                path: path.to_string_lossy().into_owned(),
+                enabled: settings.plugin_enabled.get(&id).copied().unwrap_or(true),
+            });
+        }
+    }
+    list.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok(list)
+}
+
+#[tauri::command]
+fn enable_plugin(app: AppHandle, id: String, enabled: bool) -> Result<(), String> {
+    let dir = app_data_dir(&app)?;
+    let mut settings = project::load_settings(&dir);
+    settings.plugin_enabled.insert(id, enabled);
+    project::save_settings(&dir, &settings).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn uninstall_plugin(app: AppHandle, state: State<AppState>, id: String) -> Result<(), String> {
+    let dir = plugins_dir(&state)?;
+    for ext in ["dll", "json"] {
+        let path = dir.join(format!("{id}.{ext}"));
+        if path.exists() {
+            fs::remove_file(&path).map_err(|e| format!("删除 {} 失败: {e}", path.display()))?;
+        }
+    }
+    // 顺手清理启用状态记录
+    let data_dir = app_data_dir(&app)?;
+    let mut settings = project::load_settings(&data_dir);
+    if settings.plugin_enabled.remove(&id).is_some() {
+        let _ = project::save_settings(&data_dir, &settings);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn fetch_plugin_registry(app: AppHandle, url: String) -> Result<Vec<plugin::RegistryEntry>, String> {
+    let proxy = load_proxy(&app);
+    let registry = plugin::fetch_registry(&url, &proxy)?;
+    Ok(registry.plugins)
+}
+
+/// 安装插件：下载 .dll（带进度事件）到 .bgd/plugins/ 并写入同名 .json 元数据
+#[tauri::command]
+fn install_plugin(app: AppHandle, state: State<AppState>, entry: plugin::RegistryEntry) -> Result<(), String> {
+    if entry.id.is_empty() {
+        return Err("插件 id 不能为空".to_string());
+    }
+    let dir = plugins_dir(&state)?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+
+    let proxy = load_proxy(&app);
+    let mut builder = reqwest::blocking::Client::builder().user_agent("BGD_SCE_TOOLS");
+    let proxy = proxy.trim();
+    if !proxy.is_empty() {
+        builder = builder.proxy(reqwest::Proxy::all(proxy).map_err(|e| e.to_string())?);
+    }
+    let client = builder.build().map_err(|e| e.to_string())?;
+    let mut resp = client
+        .get(&entry.download_url)
+        .send()
+        .map_err(|e| format!("下载失败: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("下载失败: HTTP {}", resp.status()));
+    }
+
+    let total = resp.content_length().unwrap_or(0);
+    let dll_path = dir.join(format!("{}.dll", entry.id));
+    let mut file = fs::File::create(&dll_path).map_err(|e| e.to_string())?;
+    let mut downloaded: u64 = 0;
+    let mut buf = [0u8; 64 * 1024];
+    use std::io::{Read, Write};
+    loop {
+        let n = resp.read(&mut buf).map_err(|e| format!("下载中断: {e}"))?;
+        if n == 0 {
+            break;
+        }
+        file.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+        downloaded += n as u64;
+        let _ = app.emit(
+            "plugin-install-progress",
+            serde_json::json!({ "id": entry.id, "downloaded": downloaded, "total": total }),
+        );
+    }
+
+    // 同名 .json 元数据（供已安装列表展示，避免为拿名字而加载 dll）
+    let meta = serde_json::json!({
+        "id": entry.id,
+        "name": entry.name,
+        "version": entry.version,
+        "description": entry.description,
+        "author": entry.author,
+    });
+    let meta_text = serde_json::to_string_pretty(&meta).map_err(|e| e.to_string())?;
+    fs::write(dir.join(format!("{}.json", entry.id)), meta_text).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 重启应用（插件 .dll 在启动时加载，安装/卸载后需重启生效）
+#[tauri::command]
+fn restart_app(app: AppHandle) {
+    tauri::process::restart(&app.env());
+}
+
 // ---------------------------------------------------------------- 入口
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -438,6 +608,14 @@ pub fn run() {
             update_framework,
             get_app_settings,
             save_app_settings,
+            get_plugin_registries,
+            save_plugin_registries,
+            get_installed_plugins,
+            enable_plugin,
+            uninstall_plugin,
+            fetch_plugin_registry,
+            install_plugin,
+            restart_app,
         ])
         .run(tauri::generate_context!())
         .expect("error while running BGD_SCE_TOOLS");

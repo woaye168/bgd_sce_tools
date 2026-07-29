@@ -3,10 +3,18 @@ import { api } from "../lib/api";
 import type { AppSettings, BgdConfig, FrameworkUpdateInfo, UpdateReport } from "../lib/types";
 import Card from "../components/Card";
 
+/** 官方插件仓库（固定第一行，不可删除） */
+const OFFICIAL_PLUGIN_REGISTRY =
+  "https://raw.githubusercontent.com/woaye168/bgd_sce_plugins/main/registry.json";
+
 /** 设置页：通用设置（代理）、项目配置（bgd.json 表单）、框架更新 */
 export default function SettingsPage() {
   const [config, setConfig] = useState<BgdConfig | null>(null);
-  const [appSettings, setAppSettings] = useState<AppSettings>({ proxy: "", watch_enabled: false, save_log: false });
+  const [appSettings, setAppSettings] = useState<AppSettings>({ proxy: "", watch_enabled: false, save_log: false, plugin_registries: [], plugin_enabled: {} });
+  const [registries, setRegistries] = useState<string[]>([]);
+  const [newRegistry, setNewRegistry] = useState("");
+  const [registryMsg, setRegistryMsg] = useState("");
+  const [testing, setTesting] = useState<Record<string, string>>({});
   const [updateInfo, setUpdateInfo] = useState<FrameworkUpdateInfo | null>(null);
   const [report, setReport] = useState<UpdateReport | null>(null);
   const [message, setMessage] = useState("");
@@ -17,7 +25,46 @@ export default function SettingsPage() {
   useEffect(() => {
     api.getConfig().then(setConfig).catch(() => setConfig(null));
     api.getAppSettings().then(setAppSettings).catch(() => {});
+    api.getPluginRegistries().then(setRegistries).catch(() => {});
   });
+
+  const persistRegistries = async (list: string[]) => {
+    // 官方仓库固定第一行
+    const normalized = [OFFICIAL_PLUGIN_REGISTRY, ...list.filter((u) => u !== OFFICIAL_PLUGIN_REGISTRY)];
+    try {
+      await api.savePluginRegistries(normalized);
+      setRegistries(normalized);
+      setRegistryMsg("✔ 插件仓库已保存");
+    } catch (e) {
+      setRegistryMsg(`✘ 保存失败: ${String(e)}`);
+    }
+  };
+
+  const addRegistry = async () => {
+    const url = newRegistry.trim();
+    if (!url) return;
+    if (registries.includes(url)) {
+      setRegistryMsg("✘ 该仓库已存在");
+      return;
+    }
+    setNewRegistry("");
+    await persistRegistries([...registries, url]);
+  };
+
+  const removeRegistry = async (url: string) => {
+    if (url === OFFICIAL_PLUGIN_REGISTRY) return;
+    await persistRegistries(registries.filter((u) => u !== url));
+  };
+
+  const testRegistry = async (url: string) => {
+    setTesting((prev) => ({ ...prev, [url]: "测试中..." }));
+    try {
+      const entries = await api.fetchPluginRegistry(url);
+      setTesting((prev) => ({ ...prev, [url]: `✔ 可访问（${entries.length} 个插件）` }));
+    } catch (e) {
+      setTesting((prev) => ({ ...prev, [url]: `✘ ${String(e)}` }));
+    }
+  };
 
   const saveAppSettings = async () => {
     setBusy(true);
@@ -162,6 +209,70 @@ export default function SettingsPage() {
         >
           保存
         </button>
+      </Card>
+
+      <Card title="插件仓库">
+        <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+          仓库地址指向 registry.json；官方仓库固定第一行，不可删除
+        </p>
+        <ul className="space-y-2">
+          {registries.map((url) => {
+            const isOfficial = url === OFFICIAL_PLUGIN_REGISTRY;
+            return (
+              <li
+                key={url}
+                className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-700"
+              >
+                <span className="min-w-0 flex-1 truncate font-mono text-xs text-slate-600 dark:text-slate-300">
+                  {url}
+                </span>
+                {isOfficial && (
+                  <span className="shrink-0 rounded bg-indigo-100 px-1.5 py-0.5 text-xs text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300">
+                    官方
+                  </span>
+                )}
+                {testing[url] && (
+                  <span className="shrink-0 text-xs text-slate-500 dark:text-slate-400">
+                    {testing[url]}
+                  </span>
+                )}
+                <button
+                  onClick={() => testRegistry(url)}
+                  className="shrink-0 rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
+                >
+                  测试连接
+                </button>
+                <button
+                  onClick={() => removeRegistry(url)}
+                  disabled={isOfficial}
+                  title={isOfficial ? "官方仓库不可删除" : "删除"}
+                  className="shrink-0 rounded-lg border border-red-300 px-2.5 py-1 text-xs text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
+                >
+                  删除
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+        <div className="mt-3 flex gap-2">
+          <input
+            value={newRegistry}
+            onChange={(e) => setNewRegistry(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && addRegistry()}
+            placeholder="https://example.com/registry.json"
+            className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm text-slate-700 dark:border-slate-600 dark:text-slate-200"
+          />
+          <button
+            onClick={addRegistry}
+            disabled={!newRegistry.trim()}
+            className="shrink-0 rounded-lg bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-500 disabled:opacity-50"
+          >
+            添加仓库
+          </button>
+        </div>
+        {registryMsg && (
+          <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{registryMsg}</p>
+        )}
       </Card>
 
       {!config && (

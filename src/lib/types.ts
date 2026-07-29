@@ -36,7 +36,7 @@ export interface FrameworkUpdateInfo {
   latest: string | null;
 }
 
-export type PageKey = "project" | "build" | "watch" | "settings" | "about";
+export type PageKey = "project" | "build" | "watch" | "plugins" | "settings" | "about";
 
 /** 应用级设置（与项目无关，存于应用配置目录 settings.json） */
 export interface AppSettings {
@@ -46,6 +46,39 @@ export interface AppSettings {
   watch_enabled: boolean;
   /** 保存日志文件开关（构建/监听日志写入 .bgd/log/build-YYYY-MM-DD.log） */
   save_log: boolean;
+  /** 插件仓库地址列表（registry.json URL，官方仓库固定第一行） */
+  plugin_registries: string[];
+  /** 插件启用状态（id -> enabled，缺省视为启用） */
+  plugin_enabled: Record<string, boolean>;
+}
+
+/** 已安装插件（.bgd/plugins/{id}.dll + 同名 .json 元数据） */
+export interface PluginInfo {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  author: string;
+  path: string;
+  enabled: boolean;
+}
+
+/** 仓库 registry.json 中的插件条目 */
+export interface RegistryEntry {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  author: string;
+  download_url: string;
+  checksum: string;
+}
+
+/** 插件下载进度事件（plugin-install-progress） */
+export interface PluginInstallProgress {
+  id: string;
+  downloaded: number;
+  total: number;
 }
 
 /** 框架增量更新报告 */

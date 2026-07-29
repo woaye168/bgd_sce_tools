@@ -27,6 +27,7 @@ bgd_sce_tools CLI
   config set <键> <值>   写入 bgd.json 覆盖项（数组用 JSON 数组形式）
   setting get <键>       读取应用设置（proxy / watch_enabled）
   setting set <键> <值>  写入应用设置
+  plugin <id> [参数...]  调用插件 CLI 接口（插件需导出 plugin_cli_execute）
 
 选项:
   --project <路径>        项目根目录（缺省为当前目录）
@@ -47,7 +48,7 @@ struct Cli {
     repo: String,
     force: bool,
     log_file: Option<PathBuf>,
-    /// config/setting 的子命令与键值（get/set <key> [value]）
+    /// config/setting 的子命令与键值（get/set <key> [value]），plugin 的参数
     extra: Vec<String>,
 }
 
@@ -230,7 +231,7 @@ fn set_config_field(cfg: &mut BgdConfig, key: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
-const CMDS: [&str; 10] = [
+const CMDS: [&str; 11] = [
     "build",
     "watch",
     "clean",
@@ -241,6 +242,7 @@ const CMDS: [&str; 10] = [
     "check-watch",
     "config",
     "setting",
+    "plugin",
 ];
 
 /// 是否命中 CLI 调用（供 main 决定是否 AttachConsole）
@@ -337,6 +339,28 @@ pub fn run() -> i32 {
                     std::thread::sleep(std::time::Duration::from_millis(300));
                 }
                 logger.log("监听已停止");
+            }
+            "plugin" => {
+                let plugin_id = cli.extra.get(0).cloned().unwrap_or_default();
+                if plugin_id.is_empty() {
+                    return Err(anyhow::anyhow!("用法: bgd_sce_tools plugin <id> [参数...]"));
+                }
+                let plugin_loader = load_plugins(&cli.project, &log)
+                    .ok_or_else(|| anyhow::anyhow!("未找到插件目录或插件加载失败"))?;
+                let plugin = plugin_loader
+                    .plugins
+                    .iter()
+                    .find(|p| p.id == plugin_id)
+                    .ok_or_else(|| anyhow::anyhow!("未找到插件: {plugin_id}"))?;
+                let cli_execute = plugin
+                    .cli_execute
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("插件 {plugin_id} 不支持 CLI 接口"))?;
+                let args: Vec<String> = cli.extra.iter().skip(1).cloned().collect();
+                match cli_execute(args) {
+                    Ok(output) => logger.log(&output),
+                    Err(e) => return Err(anyhow::anyhow!("插件执行失败: {e}")),
+                }
             }
             "config" => {
                 let (bgd_root, cfg) = load_project_config(&cli.project)?;

@@ -13,7 +13,15 @@ const DEFAULT_FRAMEWORK_REPO: &str = "woaye168/bgd_sce_framework";
 
 // ---------------------------------------------------------------- 应用设置
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+/// 官方插件仓库（固定第一行，不可删除）
+pub const OFFICIAL_PLUGIN_REGISTRY: &str =
+    "https://raw.githubusercontent.com/woaye168/bgd_sce_plugins/main/registry.json";
+
+fn default_plugin_registries() -> Vec<String> {
+    vec![OFFICIAL_PLUGIN_REGISTRY.to_string()]
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     /// HTTP 代理地址，如 http://127.0.0.1:7897；留空表示直连
     #[serde(default)]
@@ -24,6 +32,24 @@ pub struct AppSettings {
     /// 保存日志文件开关（开启后构建/监听日志写到 .bgd/log/build-YYYY-MM-DD.log）
     #[serde(default)]
     pub save_log: bool,
+    /// 插件仓库地址列表（registry.json URL）
+    #[serde(default = "default_plugin_registries")]
+    pub plugin_registries: Vec<String>,
+    /// 插件启用状态（id -> enabled，缺省视为启用）
+    #[serde(default)]
+    pub plugin_enabled: BTreeMap<String, bool>,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            proxy: String::new(),
+            watch_enabled: false,
+            save_log: false,
+            plugin_registries: default_plugin_registries(),
+            plugin_enabled: BTreeMap::new(),
+        }
+    }
 }
 
 pub fn load_settings(app_data_dir: &Path) -> AppSettings {
