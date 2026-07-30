@@ -394,6 +394,17 @@ struct PluginInfo {
     author: String,
     path: String,
     enabled: bool,
+    /// 是否导出 UI 钩子符号（决定是否显示「打开」按钮）
+    has_ui: bool,
+}
+
+/// 快速检测 dll 是否导出 UI 钩子符号（只查符号，不实例化插件）
+fn dll_has_ui_hook(path: &Path) -> bool {
+    unsafe {
+        libloading::Library::new(path)
+            .and_then(|lib| lib.get::<unsafe extern "C" fn()>(b"plugin_create_ui_hook").map(|_| ()))
+            .is_ok()
+    }
 }
 
 fn plugins_dir(state: &AppState) -> Result<PathBuf, String> {
@@ -450,6 +461,7 @@ fn get_installed_plugins(app: AppHandle, state: State<AppState>) -> Result<Vec<P
                 author: field("author"),
                 path: path.to_string_lossy().into_owned(),
                 enabled: settings.plugin_enabled.get(&id).copied().unwrap_or(true),
+                has_ui: dll_has_ui_hook(&path),
             });
         }
     }
@@ -552,6 +564,46 @@ fn restart_app(app: AppHandle) {
     tauri::process::restart(&app.env());
 }
 
+/// 按 id 定位并加载单个插件（用后即弃；dll 文件名与 id 允许 '_'/'-' 差异）
+fn load_plugin_by_id(state: &AppState, plugin_id: &str) -> Result<plugin::LoadedPlugin, String> {
+    let dir = plugins_dir(state)?;
+    let mut found = None;
+    if dir.is_dir() {
+        for entry in fs::read_dir(&dir).map_err(|e| e.to_string())? {
+            let path = entry.map_err(|e| e.to_string())?.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("dll") {
+                continue;
+            }
+            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
+            if stem == plugin_id || stem.replace('_', "-") == plugin_id {
+                found = Some(path);
+                break;
+            }
+        }
+    }
+    let path = found.ok_or_else(|| format!("未找到插件: {plugin_id}"))?;
+    plugin::LoadedPlugin::from_file(&path).map_err(|e| e.to_string())
+}
+
+/// 获取插件 UI HTML（前端用 iframe srcdoc 展示）
+#[tauri::command]
+fn get_plugin_ui(state: State<AppState>, plugin_id: String) -> Result<String, String> {
+    let plugin = load_plugin_by_id(&state, &plugin_id)?;
+    plugin
+        .render_ui()
+        .ok_or_else(|| format!("插件 {plugin_id} 没有 UI 界面"))
+}
+
+/// 插件 UI 桥接动作：register / uninstall / saveSettings 转发到插件 on_settings_changed
+#[tauri::command]
+fn plugin_action(state: State<AppState>, plugin_id: String, action: String, payload: String) -> Result<(), String> {
+    let plugin = load_plugin_by_id(&state, &plugin_id)?;
+    let payload: serde_json::Value =
+        serde_json::from_str(&payload).unwrap_or(serde_json::Value::String(payload));
+    let settings = serde_json::json!({ "action": action, "payload": payload }).to_string();
+    plugin.on_settings_changed(&settings)
+}
+
 // ---------------------------------------------------------------- 入口
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -616,6 +668,8 @@ pub fn run() {
             fetch_plugin_registry,
             install_plugin,
             restart_app,
+            get_plugin_ui,
+            plugin_action,
         ])
         .run(tauri::generate_context!())
         .expect("error while running BGD_SCE_TOOLS");

@@ -61,6 +61,8 @@ export interface PluginInfo {
   author: string;
   path: string;
   enabled: boolean;
+  /** 是否导出 UI 钩子（决定是否显示「打开」按钮） */
+  has_ui: boolean;
 }
 
 /** 仓库 registry.json 中的插件条目 */

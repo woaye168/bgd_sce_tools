@@ -22,6 +22,28 @@ interface MarketState {
   entries: RegistryEntry[];
 }
 
+/** 注入插件 UI iframe 的桥接脚本：window.bgdPlugin → postMessage 转发给宿主 */
+const BRIDGE_SCRIPT = `<script>
+window.bgdPlugin = {
+  register: function (modules) {
+    window.parent.postMessage({ __bgdPlugin: true, action: "register", payload: modules }, "*");
+  },
+  uninstall: function () {
+    window.parent.postMessage({ __bgdPlugin: true, action: "uninstall", payload: null }, "*");
+  },
+  saveSettings: function (settings) {
+    window.parent.postMessage({ __bgdPlugin: true, action: "saveSettings", payload: settings }, "*");
+  }
+};
+</script>`;
+
+/** 打开中的插件 UI（模态框内 iframe 展示） */
+interface PluginUiState {
+  id: string;
+  name: string;
+  html: string;
+}
+
 /** 插件管理页：已安装 + 各仓库市场选项卡 */
 export default function PluginPage() {
   const [registries, setRegistries] = useState<string[]>([]);
@@ -33,6 +55,7 @@ export default function PluginPage() {
   const [installing, setInstalling] = useState<Record<string, boolean>>({});
   const [needRestart, setNeedRestart] = useState(false);
   const [message, setMessage] = useState("");
+  const [pluginUi, setPluginUi] = useState<PluginUiState | null>(null);
 
   const refreshInstalled = useCallback(() => {
     api
@@ -97,6 +120,30 @@ export default function PluginPage() {
       setMessage(`✘ 卸载失败: ${String(e)}`);
     }
   };
+
+  const openPluginUi = async (p: PluginInfo) => {
+    setMessage("");
+    try {
+      const html = await api.getPluginUi(p.id);
+      setPluginUi({ id: p.id, name: p.name, html });
+    } catch (e) {
+      setMessage(`✘ 打开插件界面失败: ${String(e)}`);
+    }
+  };
+
+  // 接收插件 UI iframe 的桥接消息（window.bgdPlugin → postMessage），转发到后端
+  useEffect(() => {
+    if (!pluginUi) return;
+    const handler = (e: MessageEvent) => {
+      const d = e.data as { __bgdPlugin?: boolean; action?: string; payload?: unknown } | null;
+      if (!d || d.__bgdPlugin !== true || typeof d.action !== "string") return;
+      api
+        .pluginAction(pluginUi.id, d.action, JSON.stringify(d.payload ?? {}))
+        .catch((err) => setMessage(`✘ 插件操作失败: ${String(err)}`));
+    };
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, [pluginUi]);
 
   const install = async (entry: RegistryEntry) => {
     setInstalling((prev) => ({ ...prev, [entry.id]: true }));
@@ -206,6 +253,14 @@ export default function PluginPage() {
                       </p>
                     </div>
                     <div className="ml-4 flex shrink-0 items-center gap-3">
+                      {p.has_ui && (
+                        <button
+                          onClick={() => openPluginUi(p)}
+                          className="rounded-lg border border-indigo-300 px-3 py-1.5 text-sm text-indigo-600 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-400 dark:hover:bg-indigo-950"
+                        >
+                          打开
+                        </button>
+                      )}
                       <button
                         onClick={() => toggleEnabled(p)}
                         title={p.enabled ? "禁用" : "启用"}
@@ -330,6 +385,37 @@ export default function PluginPage() {
           <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{message}</p>
         )}
       </Card>
+
+      {/* 插件 UI 模态框（iframe srcdoc 内嵌 render_ui() 返回的 HTML） */}
+      {pluginUi && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
+          onClick={() => setPluginUi(null)}
+        >
+          <div
+            className="flex max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-xl dark:bg-slate-800"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-700">
+              <h2 className="text-sm font-medium text-slate-800 dark:text-slate-100">
+                {pluginUi.name}
+              </h2>
+              <button
+                onClick={() => setPluginUi(null)}
+                className="rounded-lg px-2 py-1 text-sm text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
+              >
+                关闭
+              </button>
+            </div>
+            <iframe
+              title={`插件界面 - ${pluginUi.name}`}
+              sandbox="allow-scripts"
+              className="h-[70vh] w-full border-0 bg-white"
+              srcDoc={BRIDGE_SCRIPT + pluginUi.html}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

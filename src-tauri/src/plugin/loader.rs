@@ -101,6 +101,20 @@ impl PluginLoader {
 
     /// 加载单个动态库文件为插件
     pub fn load_file(&mut self, path: &Path) -> Result<(), PluginLoadError> {
+        let loaded = LoadedPlugin::from_file(path)?;
+        self.plugins.push(loaded);
+        Ok(())
+    }
+
+    /// 卸载所有插件（先释放插件对象，再卸载动态库）
+    pub fn unload_all(&mut self) {
+        self.plugins.clear();
+    }
+}
+
+impl LoadedPlugin {
+    /// 从单个动态库文件构造插件实例
+    pub fn from_file(path: &Path) -> Result<Self, PluginLoadError> {
         let display = path.display().to_string();
         let lib = unsafe { Library::new(path) }.map_err(|e| PluginLoadError::LoadLibrary {
             path: display.clone(),
@@ -153,7 +167,7 @@ impl PluginLoader {
             .unwrap_or("unknown")
             .replace('_', "-");
 
-        let loaded = LoadedPlugin {
+        Ok(LoadedPlugin {
             id,
             name: plugin.name().to_string(),
             version: plugin.version().to_string(),
@@ -164,13 +178,27 @@ impl PluginLoader {
             settings_hook,
             cli_execute,
             lib,
-        };
-        self.plugins.push(loaded);
-        Ok(())
+        })
     }
 
-    /// 卸载所有插件（先释放插件对象，再卸载动态库）
-    pub fn unload_all(&mut self) {
-        self.plugins.clear();
+    /// 渲染插件 UI HTML；未导出 UiHook 或内容为空时返回 None
+    pub fn render_ui(&self) -> Option<String> {
+        let html = self.ui_hook.as_ref()?.render_ui();
+        if html.trim().is_empty() {
+            None
+        } else {
+            Some(html)
+        }
+    }
+
+    /// 转发宿主设置变更（register / uninstall / saveSettings）到插件 SettingsHook
+    pub fn on_settings_changed(&self, settings: &str) -> Result<(), String> {
+        match &self.settings_hook {
+            Some(hook) => {
+                hook.on_settings_changed(settings);
+                Ok(())
+            }
+            None => Err(format!("插件 {} 未导出 SettingsHook", self.id)),
+        }
     }
 }
