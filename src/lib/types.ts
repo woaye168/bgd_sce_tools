@@ -83,6 +83,18 @@ export interface PluginInstallProgress {
   total: number;
 }
 
+/** API 模块条目（scan_api_modules 返回） */
+export interface ApiModuleEntry {
+  /** 模块标识：<set>/<side>/<name> */
+  id: string;
+  /** 所属集合：libs / src */
+  set: string;
+  /** 端：common / server / client */
+  side: string;
+  /** 模块名（文件名去 .lua） */
+  name: string;
+}
+
 /** 框架增量更新报告 */
 export interface UpdateReport {
   updated: number;

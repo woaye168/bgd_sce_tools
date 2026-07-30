@@ -604,6 +604,51 @@ fn plugin_action(state: State<AppState>, plugin_id: String, action: String, payl
     plugin.on_settings_changed(&settings)
 }
 
+/// 扫描项目 API 模块（供插件 UI 调用）
+#[tauri::command]
+fn scan_api_modules(state: State<AppState>) -> Result<Vec<ApiModuleEntry>, String> {
+    let bgd_root = state.bgd_root()?;
+    let mut modules = Vec::new();
+    for set in ["src", "libs"] {
+        for side in ["common", "server", "client"] {
+            let api_dir = bgd_root.join(set).join(side).join("api");
+            if !api_dir.is_dir() {
+                continue;
+            }
+            let entries = match fs::read_dir(&api_dir) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) != Some("lua") {
+                    continue;
+                }
+                let name = match path.file_stem().and_then(|s| s.to_str()) {
+                    Some(n) if !n.is_empty() => n.to_string(),
+                    _ => continue,
+                };
+                modules.push(ApiModuleEntry {
+                    id: format!("{set}/{side}/{name}"),
+                    set: set.to_string(),
+                    side: side.to_string(),
+                    name,
+                });
+            }
+        }
+    }
+    Ok(modules)
+}
+
+/// API 模块条目（scan_api_modules 返回）
+#[derive(Debug, Clone, serde::Serialize)]
+struct ApiModuleEntry {
+    id: String,
+    set: String,
+    side: String,
+    name: String,
+}
+
 // ---------------------------------------------------------------- 入口
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -670,6 +715,7 @@ pub fn run() {
             restart_app,
             get_plugin_ui,
             plugin_action,
+            scan_api_modules,
         ])
         .run(tauri::generate_context!())
         .expect("error while running BGD_SCE_TOOLS");

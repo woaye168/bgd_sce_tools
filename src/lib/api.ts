@@ -2,6 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  ApiModuleEntry,
   AppSettings,
   BgdConfig,
   FrameworkUpdateInfo,
@@ -57,6 +58,7 @@ export const api = {
     invoke<string>("get_plugin_ui", { pluginId }),
   pluginAction: (pluginId: string, action: string, payload: string) =>
     invoke<void>("plugin_action", { pluginId, action, payload }),
+  scanApiModules: () => invoke<ApiModuleEntry[]>("scan_api_modules"),
 };
 
 /** 订阅后端日志事件（build / watch 共用通道） */

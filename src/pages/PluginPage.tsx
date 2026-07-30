@@ -33,6 +33,19 @@ window.bgdPlugin = {
   },
   saveSettings: function (settings) {
     window.parent.postMessage({ __bgdPlugin: true, action: "saveSettings", payload: settings }, "*");
+  },
+  scanModules: function () {
+    return new Promise(function (resolve, reject) {
+      var handler = function (e) {
+        var d = e.data;
+        if (d && d.__bgdPluginScan === true) {
+          window.removeEventListener("message", handler);
+          if (d.error) { reject(new Error(d.error)); } else { resolve(d.modules); }
+        }
+      };
+      window.addEventListener("message", handler);
+      window.parent.postMessage({ __bgdPlugin: true, action: "scanModules", payload: null }, "*");
+    });
   }
 };
 </script>`;
@@ -137,6 +150,23 @@ export default function PluginPage() {
     const handler = (e: MessageEvent) => {
       const d = e.data as { __bgdPlugin?: boolean; action?: string; payload?: unknown } | null;
       if (!d || d.__bgdPlugin !== true || typeof d.action !== "string") return;
+
+      // scanModules：宿主直接扫描文件系统，不经过插件
+      if (d.action === "scanModules") {
+        api
+          .scanApiModules()
+          .then((modules) => {
+            // 回传扫描结果给 iframe
+            const iframe = document.querySelector('iframe[data-plugin-ui]') as HTMLIFrameElement | null;
+            iframe?.contentWindow?.postMessage({ __bgdPluginScan: true, modules }, "*");
+          })
+          .catch((err) => {
+            const iframe = document.querySelector('iframe[data-plugin-ui]') as HTMLIFrameElement | null;
+            iframe?.contentWindow?.postMessage({ __bgdPluginScan: true, error: String(err) }, "*");
+          });
+        return;
+      }
+
       api
         .pluginAction(pluginUi.id, d.action, JSON.stringify(d.payload ?? {}))
         .catch((err) => setMessage(`✘ 插件操作失败: ${String(err)}`));
