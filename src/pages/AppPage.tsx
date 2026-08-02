@@ -9,7 +9,7 @@ const DEFAULT_REGISTRY_URL =
 
 /** 应用页：应用市场（远程清单）+ 已安装应用（打开/卸载） */
 export default function AppPage() {
-  const [registryUrl, setRegistryUrl] = useState(DEFAULT_REGISTRY_URL);
+  const registryUrl = DEFAULT_REGISTRY_URL;
   const [market, setMarket] = useState<AppInfo[]>([]);
   const [installed, setInstalled] = useState<InstalledApp[]>([]);
   const [message, setMessage] = useState("");
@@ -26,13 +26,15 @@ export default function AppPage() {
   const fetchMarket = useCallback(async () => {
     setMessage("正在拉取应用清单...");
     try {
-      const reg = await api.fetchAppRegistry(registryUrl.trim());
+      const reg = await api.fetchAppRegistry(registryUrl);
       setMarket(reg.apps);
       setMessage(reg.apps.length ? "" : "清单中没有应用");
     } catch (e) {
       setMessage(`✘ 拉取清单失败: ${String(e)}`);
     }
-  }, [registryUrl]);
+    // registryUrl 为常量，无需列入依赖
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     refreshInstalled();
@@ -130,13 +132,7 @@ export default function AppPage() {
       </Card>
 
       <Card title="应用市场">
-        <div className="mb-4 flex items-center gap-2">
-          <input
-            value={registryUrl}
-            onChange={(e) => setRegistryUrl(e.target.value)}
-            placeholder="应用清单 URL"
-            className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-transparent px-3 py-1.5 text-sm dark:border-slate-600"
-          />
+        <div className="mb-4 flex items-center justify-end">
           <button
             onClick={fetchMarket}
             className="shrink-0 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
