@@ -1,5 +1,6 @@
 //! BGD_SCE_TOOLS 主入口：Tauri 命令注册与应用状态管理
 
+pub mod apps;
 pub mod builder;
 pub mod config;
 pub mod project;
@@ -381,6 +382,50 @@ fn update_framework(app: AppHandle, state: State<AppState>) -> Result<project::U
     project::update_framework(&project_root, &cfg.framework_repo, &proxy, &log).map_err(|e| e.to_string())
 }
 
+// ---------------------------------------------------------------- 应用（WeGame 模式）
+
+/// 拉取应用市场清单
+#[tauri::command]
+fn fetch_app_registry(app: AppHandle, url: String) -> Result<apps::AppRegistry, String> {
+    let proxy = load_proxy(&app);
+    apps::fetch_registry(&url, &proxy).map_err(|e| e.to_string())
+}
+
+/// 安装应用（下载 exe 到 <宿主>/apps/{id}/）
+#[tauri::command]
+fn install_app(app: AppHandle, app_info: apps::AppInfo) -> Result<(), String> {
+    let proxy = load_proxy(&app);
+    apps::install_app(&app_info, &proxy).map_err(|e| e.to_string())
+}
+
+/// 卸载应用
+#[tauri::command]
+fn uninstall_app(app_id: String) -> Result<(), String> {
+    apps::uninstall_app(&app_id).map_err(|e| e.to_string())
+}
+
+/// 列出已安装应用
+#[tauri::command]
+fn get_installed_apps() -> Result<Vec<apps::InstalledApp>, String> {
+    apps::list_installed().map_err(|e| e.to_string())
+}
+
+/// 启动应用 EXE（有当前项目则传 --project-path）
+#[tauri::command]
+fn start_app(state: State<AppState>, app_id: String) -> Result<(), String> {
+    let app_exe = apps::app_exe_path(&app_id).map_err(|e| e.to_string())?;
+    if !app_exe.is_file() {
+        return Err(format!("应用 {app_id} 未安装"));
+    }
+    let mut cmd = std::process::Command::new(app_exe);
+    // 有当前项目则传 --project-path（应用可选实现）
+    if let Some(root) = state.project.lock().map_err(|e| e.to_string())?.as_ref() {
+        cmd.arg("--project-path").arg(root);
+    }
+    cmd.spawn().map_err(|e| format!("启动应用失败: {e}"))?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------- 入口
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -437,6 +482,11 @@ pub fn run() {
             update_framework,
             get_app_settings,
             save_app_settings,
+            fetch_app_registry,
+            install_app,
+            uninstall_app,
+            get_installed_apps,
+            start_app,
         ])
         .run(tauri::generate_context!())
         .expect("error while running BGD_SCE_TOOLS");

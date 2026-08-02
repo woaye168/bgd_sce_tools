@@ -5,7 +5,7 @@
 //! 约定：新增/修改任何构建或项目功能时，必须同步更新本模块（见 AGENTS.md）。
 
 use anyhow::{Context, Result};
-use bgd_sce_tools_lib::{builder, config::BgdConfig, project};
+use bgd_sce_tools_lib::{apps, builder, config::BgdConfig, project};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -27,6 +27,7 @@ bgd_sce_tools CLI
   config set <键> <值>   写入 bgd.json 覆盖项（数组用 JSON 数组形式）
   setting get <键>       读取应用设置（proxy / watch_enabled）
   setting set <键> <值>  写入应用设置
+  app <应用id>           启动已安装的应用 EXE（透传 --project-path）
 
 选项:
   --project <路径>        项目根目录（缺省为当前目录）
@@ -38,6 +39,7 @@ bgd_sce_tools CLI
 示例:
   bgd_sce_tools build --project D:\\maps\\my_game --log .bgd/log/build.log
   bgd_sce_tools check-watch --project D:\\maps\\my_game
+  bgd_sce_tools app visual-injector --project D:\\maps\\my_game
 ";
 
 struct Cli {
@@ -206,7 +208,7 @@ fn set_config_field(cfg: &mut BgdConfig, key: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
-const CMDS: [&str; 10] = [
+const CMDS: [&str; 11] = [
     "build",
     "watch",
     "clean",
@@ -217,6 +219,7 @@ const CMDS: [&str; 10] = [
     "check-watch",
     "config",
     "setting",
+    "app",
 ];
 
 /// 是否命中 CLI 调用（供 main 决定是否 AttachConsole）
@@ -355,6 +358,21 @@ pub fn run() -> i32 {
                     }
                     other => return Err(anyhow::anyhow!("未知 setting 子命令: {other}（get/set）")),
                 }
+            }
+            "app" => {
+                let app_id = cli.extra.first().cloned().unwrap_or_default();
+                if app_id.is_empty() {
+                    return Err(anyhow::anyhow!("app 缺少应用 id，用法: bgd_sce_tools app <应用id> [--project <路径>]"));
+                }
+                let app_exe = apps::app_exe_path(&app_id)?;
+                if !app_exe.is_file() {
+                    return Err(anyhow::anyhow!("应用 {app_id} 未安装（{} 不存在）", app_exe.display()));
+                }
+                let mut cmd = std::process::Command::new(&app_exe);
+                // 透传 --project-path（应用可选实现；CLI 用 --project 指定，缺省当前目录）
+                cmd.arg("--project-path").arg(&cli.project);
+                cmd.spawn().with_context(|| format!("启动应用失败: {}", app_exe.display()))?;
+                logger.log(&format!("已启动应用: {app_id}（--project-path {}）", cli.project.display()));
             }
             _ => unreachable!(),
         }

@@ -36,7 +36,32 @@ export interface FrameworkUpdateInfo {
   latest: string | null;
 }
 
-export type PageKey = "project" | "build" | "watch" | "settings" | "about";
+export type PageKey = "project" | "build" | "watch" | "apps" | "settings" | "about";
+
+/** 应用清单项（registry.json 中一个应用） */
+export interface AppInfo {
+  id: string;
+  name: string;
+  version: string;
+  description?: string;
+  author?: string;
+  download_url: string;
+  checksum?: string;
+}
+
+/** 应用清单（registry.json 顶层） */
+export interface AppRegistry {
+  apps: AppInfo[];
+}
+
+/** 已安装应用（apps/{id}/app.json） */
+export interface InstalledApp {
+  id: string;
+  name: string;
+  version: string;
+  description?: string;
+  author?: string;
+}
 
 /** 应用级设置（与项目无关，存于应用配置目录 settings.json） */
 export interface AppSettings {

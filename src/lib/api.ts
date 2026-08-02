@@ -2,9 +2,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  AppInfo,
+  AppRegistry,
   AppSettings,
   BgdConfig,
   FrameworkUpdateInfo,
+  InstalledApp,
   LogEvent,
   ProjectInfo,
   UpdateReport,
@@ -37,6 +40,15 @@ export const api = {
   getAppSettings: () => invoke<AppSettings>("get_app_settings"),
   saveAppSettings: (settings: AppSettings) =>
     invoke<void>("save_app_settings", { settings }),
+
+  // 应用（WeGame 模式）
+  fetchAppRegistry: (url: string) =>
+    invoke<AppRegistry>("fetch_app_registry", { url }),
+  installApp: (appInfo: AppInfo) =>
+    invoke<void>("install_app", { appInfo }),
+  uninstallApp: (appId: string) => invoke<void>("uninstall_app", { appId }),
+  getInstalledApps: () => invoke<InstalledApp[]>("get_installed_apps"),
+  startApp: (appId: string) => invoke<void>("start_app", { appId }),
 };
 
 /** 订阅后端日志事件（build / watch 共用通道） */
