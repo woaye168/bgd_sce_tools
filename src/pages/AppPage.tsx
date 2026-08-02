@@ -132,14 +132,6 @@ export default function AppPage() {
       </Card>
 
       <Card title="应用市场">
-        <div className="mb-4 flex items-center justify-end">
-          <button
-            onClick={fetchMarket}
-            className="shrink-0 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
-          >
-            刷新
-          </button>
-        </div>
         {market.length === 0 ? (
           <p className="text-sm text-slate-500 dark:text-slate-400">
             暂无应用（检查清单 URL 或网络/代理）
@@ -165,9 +157,24 @@ export default function AppPage() {
                     </p>
                   )}
                 </div>
-                <div className="ml-4 shrink-0">
+                <div className="ml-4 flex shrink-0 items-center gap-2">
                   {isInstalled(app.id) ? (
-                    <span className="text-sm text-emerald-500">已安装</span>
+                    <>
+                      <span className="text-sm text-emerald-500">已安装</span>
+                      <button
+                        onClick={() =>
+                          uninstall({
+                            id: app.id,
+                            name: app.name,
+                            version: app.version,
+                          })
+                        }
+                        disabled={busyId === app.id}
+                        className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
+                      >
+                        {busyId === app.id ? "处理中..." : "卸载"}
+                      </button>
+                    </>
                   ) : (
                     <button
                       onClick={() => install(app)}
