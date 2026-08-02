@@ -197,4 +197,4 @@ git push origin v0.1.4
 
 ## 许可证
 
-本项目采用 [GNU General Public License v3.0](LICENSE) 开源。
+本项目采用 [GNU Affero General Public License v3.0](LICENSE) 开源。

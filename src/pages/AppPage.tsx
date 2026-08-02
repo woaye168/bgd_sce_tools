@@ -109,20 +109,13 @@ export default function AppPage() {
                     </p>
                   )}
                 </div>
-                <div className="ml-4 flex shrink-0 gap-2">
+                <div className="ml-4 shrink-0">
                   <button
                     onClick={() => open(app)}
                     disabled={busyId === app.id}
                     className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm text-white hover:bg-indigo-500 disabled:opacity-50"
                   >
                     {busyId === app.id ? "处理中..." : "打开"}
-                  </button>
-                  <button
-                    onClick={() => uninstall(app)}
-                    disabled={busyId === app.id}
-                    className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
-                  >
-                    卸载
                   </button>
                 </div>
               </li>
