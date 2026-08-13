@@ -13,11 +13,12 @@ export default function SettingsPage() {
   const [settingsMsg, setSettingsMsg] = useState("");
   const [busy, setBusy] = useState(false);
 
-  // 进入页面即刷新配置（含 init.lock / bgd.json 最新状态）
+  // 进入页面即拉取一次配置（含 init.lock / bgd.json 最新状态）
+  // 必须有依赖数组 []：无依赖时每次渲染都会重新拉取并用存档值覆盖输入框，导致无法正常输入
   useEffect(() => {
     api.getConfig().then(setConfig).catch(() => setConfig(null));
     api.getAppSettings().then(setAppSettings).catch(() => {});
-  });
+  }, []);
 
   const saveAppSettings = async () => {
     setBusy(true);

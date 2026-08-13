@@ -26,10 +26,11 @@ export default function ProjectPage({ onProjectChanged }: ProjectPageProps) {
     }
   };
 
-  // 进入页面即刷新（含 init.lock 状态，删除 lock 后按钮恢复可点）
+  // 进入页面即刷新（页面切换会重新挂载，[] 依赖即可保证每次进入都拉最新状态；
+  // 无依赖数组会在每次渲染后重复拉取，形成无效的刷新循环）
   useEffect(() => {
     refresh();
-  });
+  }, []);
 
   const pickAndSelect = async () => {
     const selected = await open({ directory: true, title: "选择 SCE 项目文件夹" });
