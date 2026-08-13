@@ -3,7 +3,9 @@
 pub mod apps;
 pub mod builder;
 pub mod config;
+pub mod net;
 pub mod project;
+pub mod updater;
 
 use config::BgdConfig;
 use std::fs;
@@ -193,6 +195,13 @@ fn load_proxy(app: &AppHandle) -> String {
         .unwrap_or_default()
 }
 
+/// 读取 GitHub Token（私有仓库的框架/插件/自我更新认证）
+fn load_token(app: &AppHandle) -> String {
+    app_data_dir(app)
+        .map(|d| project::load_settings(&d).github_token)
+        .unwrap_or_default()
+}
+
 /// 持久化监听开关状态
 fn persist_watch_enabled(app: &AppHandle, enabled: bool) {
     if let Ok(dir) = app_data_dir(app) {
@@ -342,7 +351,8 @@ fn init_project(app: AppHandle, state: State<AppState>, path: String, repo: Stri
     }
     let log = |line: &str| emit_log(&app, "build", line);
     let proxy = load_proxy(&app);
-    let msg = project::init_project(&root, &repo, &proxy, force, &log).map_err(|e| e.to_string())?;
+    let token = load_token(&app);
+    let msg = project::init_project(&root, &repo, &proxy, &token, force, &log).map_err(|e| e.to_string())?;
     // 初始化完成后自动设为当前项目
     *state.project.lock().map_err(|e| e.to_string())? = Some(root.clone());
     // 若监听开关为开，自动恢复监听（init 前已停掉，此处按用户选择的状态恢复）
@@ -365,7 +375,8 @@ fn check_framework_update(app: AppHandle, state: State<AppState>) -> Result<serd
     let bgd_root = state.bgd_root()?;
     let cfg = load_cfg(&bgd_root)?;
     let proxy = load_proxy(&app);
-    let latest = project::latest_framework_version(&cfg.framework_repo, &proxy).map_err(|e| e.to_string())?;
+    let token = load_token(&app);
+    let latest = project::latest_framework_version(&cfg.framework_repo, &proxy, &token).map_err(|e| e.to_string())?;
     Ok(serde_json::json!({
         "current": cfg.framework_version,
         "latest": latest,
@@ -378,8 +389,9 @@ fn update_framework(app: AppHandle, state: State<AppState>) -> Result<project::U
     let cfg = load_cfg(&bgd_root)?;
     let log = |line: &str| emit_log(&app, "build", line);
     let proxy = load_proxy(&app);
+    let token = load_token(&app);
     let project_root = bgd_root.parent().ok_or("无法确定项目根目录")?.to_path_buf();
-    project::update_framework(&project_root, &cfg.framework_repo, &proxy, &log).map_err(|e| e.to_string())
+    project::update_framework(&project_root, &cfg.framework_repo, &proxy, &token, &log).map_err(|e| e.to_string())
 }
 
 // ---------------------------------------------------------------- 应用（WeGame 模式）
@@ -388,14 +400,16 @@ fn update_framework(app: AppHandle, state: State<AppState>) -> Result<project::U
 #[tauri::command]
 fn fetch_app_registry(app: AppHandle, url: String) -> Result<apps::AppRegistry, String> {
     let proxy = load_proxy(&app);
-    apps::fetch_registry(&url, &proxy).map_err(|e| e.to_string())
+    let token = load_token(&app);
+    apps::fetch_registry(&url, &proxy, &token).map_err(|e| e.to_string())
 }
 
 /// 安装应用（下载 exe 到 <宿主>/apps/{id}/）
 #[tauri::command]
 fn install_app(app: AppHandle, app_info: apps::AppInfo) -> Result<(), String> {
     let proxy = load_proxy(&app);
-    apps::install_app(&app_info, &proxy).map_err(|e| e.to_string())
+    let token = load_token(&app);
+    apps::install_app(&app_info, &proxy, &token).map_err(|e| e.to_string())
 }
 
 /// 卸载应用
@@ -426,13 +440,30 @@ fn start_app(state: State<AppState>, app_id: String) -> Result<(), String> {
     Ok(())
 }
 
+// ---------------------------------------------------------------- 自我更新
+
+/// 检查是否有新版本（私有仓库需 token，从应用设置读取）
+#[tauri::command]
+fn check_self_update(app: AppHandle, current: String) -> Result<updater::SelfUpdateInfo, String> {
+    let proxy = load_proxy(&app);
+    let token = load_token(&app);
+    updater::check_self_update(&current, &proxy, &token).map_err(|e| e.to_string())
+}
+
+/// 下载最新安装包并启动安装器（安装器会自动关闭并替换当前程序）
+#[tauri::command]
+fn start_self_update(app: AppHandle) -> Result<(), String> {
+    let proxy = load_proxy(&app);
+    let token = load_token(&app);
+    updater::start_self_update(&proxy, &token).map_err(|e| e.to_string())
+}
+
 // ---------------------------------------------------------------- 入口
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppState {
             project: Mutex::new(None),
             watcher: Mutex::new(None),
@@ -487,6 +518,8 @@ pub fn run() {
             uninstall_app,
             get_installed_apps,
             start_app,
+            check_self_update,
+            start_self_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running BGD_SCE_TOOLS");

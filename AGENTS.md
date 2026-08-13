@@ -43,7 +43,7 @@ bgd_sce_tools check-framework --project <路径> [--proxy http://...]
 bgd_sce_tools check-watch --project <项目路径>       # 判断是否监听中
 bgd_sce_tools config get <键> --project <项目路径>   # 读取 bgd 配置（合并后生效值）
 bgd_sce_tools config set <键> <值> --project <路径>  # 写入 bgd.json 覆盖项
-bgd_sce_tools setting get <键>                       # 读取应用设置（proxy / watch_enabled）
+bgd_sce_tools setting get <键>                       # 读取应用设置（proxy / watch_enabled / github_token）
 bgd_sce_tools setting set <键> <值>                  # 写入应用设置
 ```
 
@@ -77,6 +77,8 @@ src-tauri/src/
 
 ## 关键机制（改代码前必读）
 
+- **私有仓库认证（GitHub Token）**：四个仓库均为私有，所有 GitHub 请求（api.github.com / codeload / raw.githubusercontent / release asset API）必须走 `net.rs` 的 `http_client(proxy, token)`，token 来自应用设置 `github_token`（fine-grained PAT，Contents 只读）。token 为空时不加头（兼容公开仓库）。**禁止**绕过 net.rs 自建 reqwest 客户端。
+- **release asset 下载**：私有仓库的 asset 直链（releases/download/...）带 token 也 404，必须走 API：`repos/<repo>/releases/tags/<tag>` 定位 asset → `asset.url` + `Accept: application/octet-stream` 下载（插件安装与自我更新均如此）。
 - **静态 require 改写**：源码写真实路径（`require('src.xxx')`），构建时引号内前缀改写为运行时根名（`bgd_game_server.` 等）。**禁止**恢复字符串拼接构造 require 路径。
 - **白名单构建**：code set 根下仅 `server/client/common/res/entrance` 进产物；根级文件（init.lua、bgd_default.json、.emmyrc.json、.gitignore、doc/）各有专门流程。
 - **资源系统**：`res/` 目录五类资源（image/particle/sound/spine/sprites）同步到引擎目录；`.lua` 中字符串字面量 `'libs/res/<类型>/...'` / `'src/res/<类型>/...'` 在构建时替换为运行时路径（sound 去 `.ogg` 扩展名，sprites 前缀 `@<ProjectName>` 从 map_settings.json 注入）。

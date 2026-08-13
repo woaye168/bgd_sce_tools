@@ -6,7 +6,7 @@ import Card from "../components/Card";
 /** 设置页：通用设置（代理）、项目配置（bgd.json 表单）、框架更新 */
 export default function SettingsPage() {
   const [config, setConfig] = useState<BgdConfig | null>(null);
-  const [appSettings, setAppSettings] = useState<AppSettings>({ proxy: "", watch_enabled: false, save_log: false });
+  const [appSettings, setAppSettings] = useState<AppSettings>({ proxy: "", watch_enabled: false, save_log: false, github_token: "" });
   const [updateInfo, setUpdateInfo] = useState<FrameworkUpdateInfo | null>(null);
   const [report, setReport] = useState<UpdateReport | null>(null);
   const [message, setMessage] = useState("");
@@ -152,6 +152,21 @@ export default function SettingsPage() {
             value={appSettings.proxy}
             onChange={(e) => setAppSettings((prev) => ({ ...prev, proxy: e.target.value }))}
             placeholder="http://127.0.0.1:7897"
+            className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm text-slate-700 dark:border-slate-600 dark:text-slate-200"
+          />
+        </label>
+        <label className="mt-4 block">
+          <span className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">
+            GitHub Token
+            <span className="ml-2 text-slate-400">
+              fine-grained PAT（Contents 只读）；私有仓库的框架下载/更新、应用市场、自我更新均需要
+            </span>
+          </span>
+          <input
+            type="password"
+            value={appSettings.github_token}
+            onChange={(e) => setAppSettings((prev) => ({ ...prev, github_token: e.target.value }))}
+            placeholder="github_pat_..."
             className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm text-slate-700 dark:border-slate-600 dark:text-slate-200"
           />
         </label>

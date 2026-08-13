@@ -10,6 +10,7 @@ import type {
   InstalledApp,
   LogEvent,
   ProjectInfo,
+  SelfUpdateInfo,
   UpdateReport,
 } from "./types";
 
@@ -40,6 +41,11 @@ export const api = {
   getAppSettings: () => invoke<AppSettings>("get_app_settings"),
   saveAppSettings: (settings: AppSettings) =>
     invoke<void>("save_app_settings", { settings }),
+
+  // 自我更新（自建逻辑：私有仓库下 tauri updater 插件无法携带 token）
+  checkSelfUpdate: (current: string) =>
+    invoke<SelfUpdateInfo>("check_self_update", { current }),
+  startSelfUpdate: () => invoke<void>("start_self_update"),
 
   // 应用（WeGame 模式）
   fetchAppRegistry: (url: string) =>

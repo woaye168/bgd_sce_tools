@@ -38,15 +38,20 @@ export interface FrameworkUpdateInfo {
 
 export type PageKey = "project" | "build" | "watch" | "apps" | "settings" | "about";
 
-/** 应用清单项（registry.json 中一个应用） */
+/** 应用清单项（registry.json 中一个应用）
+ * 私有仓库下 asset 直链不可用，用 repo + tag + asset_name 走 API 定位下载 */
 export interface AppInfo {
   id: string;
   name: string;
   version: string;
   description?: string;
   author?: string;
-  download_url: string;
-  checksum?: string;
+  /** GitHub 仓库（owner/repo） */
+  repo: string;
+  /** Release tag（"latest" 表示最新 Release） */
+  tag: string;
+  /** Release asset 文件名 */
+  asset_name: string;
 }
 
 /** 应用清单（registry.json 顶层） */
@@ -71,6 +76,15 @@ export interface AppSettings {
   watch_enabled: boolean;
   /** 保存日志文件开关（构建/监听日志写入 .bgd/log/build-YYYY-MM-DD.log） */
   save_log: boolean;
+  /** GitHub Token（fine-grained PAT，Contents 只读；私有仓库的框架/插件/自我更新均需要） */
+  github_token: string;
+}
+
+/** 自我更新检查结果 */
+export interface SelfUpdateInfo {
+  current: string;
+  latest: string;
+  has_update: boolean;
 }
 
 /** 框架增量更新报告 */

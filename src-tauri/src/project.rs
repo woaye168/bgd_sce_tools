@@ -24,6 +24,9 @@ pub struct AppSettings {
     /// 保存日志文件开关（开启后构建/监听日志写到 .bgd/log/build-YYYY-MM-DD.log）
     #[serde(default)]
     pub save_log: bool,
+    /// GitHub Token（fine-grained PAT，Contents 只读；私有仓库的框架/插件/自我更新均需要）
+    #[serde(default)]
+    pub github_token: String,
 }
 
 pub fn load_settings(app_data_dir: &Path) -> AppSettings {
@@ -77,22 +80,13 @@ pub fn add_recent(app_data_dir: &Path, project: &str) -> Result<Vec<String>> {
 
 // ---------------------------------------------------------------- GitHub 下载
 
-fn http_client(proxy: &str) -> Result<reqwest::blocking::Client> {
-    let mut builder = reqwest::blocking::Client::builder().user_agent("BGD_SCE_TOOLS");
-    let proxy = proxy.trim();
-    if !proxy.is_empty() {
-        builder = builder.proxy(reqwest::Proxy::all(proxy).context("代理地址无效")?);
-    }
-    builder.build().context("无法创建 HTTP 客户端")
-}
-
 fn effective_repo(repo: &str) -> &str {
     if repo.is_empty() { DEFAULT_FRAMEWORK_REPO } else { repo }
 }
 
 /// 下载 zip 并解压到临时目录，返回 <解压根>/template 路径
-fn download_and_extract(url: &str, proxy: &str) -> Result<PathBuf> {
-    let resp = http_client(proxy)?
+fn download_and_extract(url: &str, proxy: &str, token: &str) -> Result<PathBuf> {
+    let resp = crate::net::http_client(proxy, token)?
         .get(url)
         .send()
         .with_context(|| format!("下载失败: {url}"))?;
@@ -122,21 +116,21 @@ fn download_and_extract(url: &str, proxy: &str) -> Result<PathBuf> {
 }
 
 /// 下载框架 main 分支快照
-fn download_framework_template(repo: &str, proxy: &str) -> Result<PathBuf> {
+fn download_framework_template(repo: &str, proxy: &str, token: &str) -> Result<PathBuf> {
     let url = format!("https://codeload.github.com/{}/zip/refs/heads/main", effective_repo(repo));
-    download_and_extract(&url, proxy)
+    download_and_extract(&url, proxy, token)
 }
 
 /// 下载框架指定 tag 快照（用于重建旧版基准）
-fn download_framework_tag(repo: &str, tag: &str, proxy: &str) -> Result<PathBuf> {
+fn download_framework_tag(repo: &str, tag: &str, proxy: &str, token: &str) -> Result<PathBuf> {
     let url = format!("https://codeload.github.com/{}/zip/refs/tags/{tag}", effective_repo(repo));
-    download_and_extract(&url, proxy)
+    download_and_extract(&url, proxy, token)
 }
 
 /// 查询框架最新版本（最新 release 的 tag_name；无 release 时返回 None）
-pub fn latest_framework_version(repo: &str, proxy: &str) -> Result<Option<String>> {
+pub fn latest_framework_version(repo: &str, proxy: &str, token: &str) -> Result<Option<String>> {
     let url = format!("https://api.github.com/repos/{}/releases/latest", effective_repo(repo));
-    let resp = http_client(proxy)?.get(&url).send()?;
+    let resp = crate::net::http_client(proxy, token)?.get(&url).send()?;
     if resp.status() == reqwest::StatusCode::NOT_FOUND {
         return Ok(None);
     }
@@ -244,7 +238,7 @@ fn save_state(project_root: &Path, cfg: &BgdConfig) -> Result<()> {
 
 /// 初始化项目：下载框架 -> 生成 .bgd/ -> 合并生成项目根配置 -> 写 init.lock 与更新基准
 /// 若存在 init.lock 且未 force，则拒绝
-pub fn init_project(project_root: &Path, repo: &str, proxy: &str, force: bool, log: &crate::builder::LogFn) -> Result<String> {
+pub fn init_project(project_root: &Path, repo: &str, proxy: &str, token: &str, force: bool, log: &crate::builder::LogFn) -> Result<String> {
     let dest_bgd = project_root.join(".bgd");
     let lock_path = dest_bgd.join("init.lock");
     if lock_path.exists() && !force {
@@ -254,7 +248,7 @@ pub fn init_project(project_root: &Path, repo: &str, proxy: &str, force: bool, l
     }
 
     log("开始下载框架...");
-    let template = download_framework_template(repo, proxy)?;
+    let template = download_framework_template(repo, proxy, token)?;
     let tpl_bgd = template.join(".bgd");
     if !tpl_bgd.is_dir() {
         return Err(anyhow!("框架模板缺少 template/.bgd 目录"));
@@ -293,7 +287,7 @@ pub fn init_project(project_root: &Path, repo: &str, proxy: &str, force: bool, l
     // 记录框架来源与版本（tag 去 v 前缀）
     let mut cfg = cfg;
     cfg.framework_repo = effective_repo(repo).to_string();
-    if let Ok(Some(ver)) = latest_framework_version(repo, proxy) {
+    if let Ok(Some(ver)) = latest_framework_version(repo, proxy, token) {
         cfg.framework_version = ver.trim_start_matches('v').to_string();
     }
     cfg.save(&dest_bgd)?;
@@ -330,7 +324,7 @@ pub struct UpdateReport {
 }
 
 /// 更新框架：只处理 .bgd/libs（三路哈希对比），随后重新合并生成项目根配置
-pub fn update_framework(project_root: &Path, repo: &str, proxy: &str, log: &crate::builder::LogFn) -> Result<UpdateReport> {
+pub fn update_framework(project_root: &Path, repo: &str, proxy: &str, token: &str, log: &crate::builder::LogFn) -> Result<UpdateReport> {
     let dest_bgd = project_root.join(".bgd");
     if !dest_bgd.is_dir() {
         return Err(anyhow!("项目尚未初始化（缺少 .bgd 目录）"));
@@ -350,7 +344,7 @@ pub fn update_framework(project_root: &Path, repo: &str, proxy: &str, log: &crat
             let ver = cfg.framework_version.trim_start_matches('v').to_string();
             if !ver.is_empty() {
                 log(&format!("无本地基准，尝试下载旧版 v{ver} 重建..."));
-                match download_framework_tag(&cfg.framework_repo, &format!("v{ver}"), proxy) {
+                match download_framework_tag(&cfg.framework_repo, &format!("v{ver}"), proxy, token) {
                     Ok(tpl) => {
                         baseline = collect_libs_hashes(&tpl.join(".bgd").join("libs"), ".bgd/libs")?;
                         log(&format!("已用旧版 v{ver} 重建基准（{} 个文件）", baseline.len()));
@@ -371,7 +365,7 @@ pub fn update_framework(project_root: &Path, repo: &str, proxy: &str, log: &crat
 
     // 2. 新版（remote）
     log("开始下载最新框架...");
-    let template = download_framework_template(repo, proxy)?;
+    let template = download_framework_template(repo, proxy, token)?;
     let remote_libs = template.join(".bgd").join("libs");
     let remote = collect_libs_hashes(&remote_libs, ".bgd/libs")?;
 
@@ -455,7 +449,7 @@ pub fn update_framework(project_root: &Path, repo: &str, proxy: &str, log: &crat
 
     // 5. 版本与基准回写
     let mut cfg = cfg;
-    if let Ok(Some(ver)) = latest_framework_version(repo, proxy) {
+    if let Ok(Some(ver)) = latest_framework_version(repo, proxy, token) {
         cfg.framework_version = ver.trim_start_matches('v').to_string();
     }
     cfg.save(&dest_bgd)?;

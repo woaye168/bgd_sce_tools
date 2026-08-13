@@ -25,7 +25,7 @@ bgd_sce_tools CLI
   check-watch            检查项目当前是否处于监听中
   config get <键>        读取 bgd 配置（合并后生效值）
   config set <键> <值>   写入 bgd.json 覆盖项（数组用 JSON 数组形式）
-  setting get <键>       读取应用设置（proxy / watch_enabled）
+  setting get <键>       读取应用设置（proxy / watch_enabled / github_token）
   setting set <键> <值>  写入应用设置
   app <应用id>           启动已安装的应用 EXE（透传 --project-path）
 
@@ -253,13 +253,15 @@ pub fn run() -> i32 {
                 builder::clean_logs(&bgd_root, &log)?;
             }
             "init" => {
-                let msg = project::init_project(&cli.project, &cli.repo, &cli.proxy, cli.force, &log)?;
+                let token = project::load_settings(&app_config_dir()?).github_token;
+                let msg = project::init_project(&cli.project, &cli.repo, &cli.proxy, &token, cli.force, &log)?;
                 logger.log(&msg);
             }
             "update-framework" => {
                 let (_bgd_root, cfg) = load_project_config(&cli.project)?;
+                let token = project::load_settings(&app_config_dir()?).github_token;
                 let report =
-                    project::update_framework(&cli.project, &cfg.framework_repo, &cli.proxy, &log)?;
+                    project::update_framework(&cli.project, &cfg.framework_repo, &cli.proxy, &token, &log)?;
                 logger.log(&format!(
                     "更新报告: version={} updated={} added={} removed={} kept_local={} conflicts={}",
                     report.version,
@@ -278,7 +280,8 @@ pub fn run() -> i32 {
             }
             "check-framework" => {
                 let (_bgd_root, cfg) = load_project_config(&cli.project)?;
-                let latest = project::latest_framework_version(&cfg.framework_repo, &cli.proxy)?;
+                let token = project::load_settings(&app_config_dir()?).github_token;
+                let latest = project::latest_framework_version(&cfg.framework_repo, &cli.proxy, &token)?;
                 logger.log(&format!("当前: {}", cfg.framework_version));
                 logger.log(&format!("最新: {}", latest.as_deref().unwrap_or("(无法获取)")));
             }
@@ -347,9 +350,10 @@ pub fn run() -> i32 {
                             "watch_enabled" => {
                                 settings.watch_enabled = matches!(value.as_str(), "true" | "1" | "yes")
                             }
+                            "github_token" => settings.github_token = value.clone(),
                             other => {
                                 return Err(anyhow::anyhow!(
-                                    "未知设置键: {other}（可用: proxy / watch_enabled）"
+                                    "未知设置键: {other}（可用: proxy / watch_enabled / github_token）"
                                 ))
                             }
                         }

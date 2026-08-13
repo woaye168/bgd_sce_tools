@@ -6,6 +6,7 @@ use std::fs;
 use std::path::PathBuf;
 
 /// 应用清单项（registry.json 中一个应用）
+/// 私有仓库下 release asset 直链不可用，下载必须走 API：repo + tag + asset_name 定位
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppInfo {
     pub id: String,
@@ -15,9 +16,12 @@ pub struct AppInfo {
     pub description: String,
     #[serde(default)]
     pub author: String,
-    pub download_url: String,
-    #[serde(default)]
-    pub checksum: String,
+    /// GitHub 仓库（owner/repo）
+    pub repo: String,
+    /// Release tag（"latest" 表示最新 Release）
+    pub tag: String,
+    /// Release asset 文件名
+    pub asset_name: String,
 }
 
 /// 应用清单（registry.json 顶层）
@@ -64,18 +68,9 @@ pub fn app_exe_path(id: &str) -> Result<PathBuf> {
 
 // ---------------------------------------------------------------- 清单拉取
 
-fn http_client(proxy: &str) -> Result<reqwest::blocking::Client> {
-    let mut builder = reqwest::blocking::Client::builder().user_agent("BGD_SCE_TOOLS");
-    let proxy = proxy.trim();
-    if !proxy.is_empty() {
-        builder = builder.proxy(reqwest::Proxy::all(proxy).context("代理地址无效")?);
-    }
-    builder.build().context("创建 HTTP 客户端失败")
-}
-
 /// 从远程清单 URL 拉取应用列表
-pub fn fetch_registry(url: &str, proxy: &str) -> Result<AppRegistry> {
-    let resp = http_client(proxy)?
+pub fn fetch_registry(url: &str, proxy: &str, token: &str) -> Result<AppRegistry> {
+    let resp = crate::net::http_client(proxy, token)?
         .get(url)
         .send()
         .with_context(|| format!("请求应用清单失败: {url}"))?;
@@ -89,14 +84,42 @@ pub fn fetch_registry(url: &str, proxy: &str) -> Result<AppRegistry> {
 // ---------------------------------------------------------------- 安装 / 卸载 / 列表
 
 /// 下载并安装应用 exe 到 <宿主>/apps/{id}/
-pub fn install_app(app: &AppInfo, proxy: &str) -> Result<()> {
+/// 流程：API 解析 Release -> 按 asset_name 找 asset -> asset API URL + Accept: octet-stream 下载
+pub fn install_app(app: &AppInfo, proxy: &str, token: &str) -> Result<()> {
     let dir = app_dir(&app.id)?;
     fs::create_dir_all(&dir).with_context(|| format!("创建应用目录失败: {}", dir.display()))?;
 
-    let resp = http_client(proxy)?
-        .get(&app.download_url)
+    let client = crate::net::http_client(proxy, token)?;
+
+    // 1. 解析 Release（tag 为 "latest" 时取最新 Release）
+    let release_url = if app.tag == "latest" {
+        format!("https://api.github.com/repos/{}/releases/latest", app.repo)
+    } else {
+        format!("https://api.github.com/repos/{}/releases/tags/{}", app.repo, app.tag)
+    };
+    let resp = client
+        .get(&release_url)
         .send()
-        .with_context(|| format!("下载应用失败: {}", app.download_url))?;
+        .with_context(|| format!("查询应用 Release 失败: {release_url}"))?;
+    if !resp.status().is_success() {
+        return Err(anyhow!("查询应用 Release 失败: HTTP {}（{}）", resp.status(), app.repo));
+    }
+    let release: serde_json::Value = resp.json().context("解析 Release 响应失败")?;
+
+    // 2. 按文件名定位 asset（asset["url"] 是 API 地址，带 token 才能下载）
+    let assets = release["assets"].as_array().cloned().unwrap_or_default();
+    let asset_url = assets
+        .iter()
+        .find(|a| a["name"].as_str() == Some(app.asset_name.as_str()))
+        .and_then(|a| a["url"].as_str().map(str::to_string))
+        .ok_or_else(|| anyhow!("Release {} 中找不到 asset: {}", app.tag, app.asset_name))?;
+
+    // 3. 下载 asset（Accept: octet-stream；302 到 CDN 时敏感头自动剥离）
+    let resp = client
+        .get(&asset_url)
+        .header(reqwest::header::ACCEPT, "application/octet-stream")
+        .send()
+        .with_context(|| format!("下载应用失败: {}", app.asset_name))?;
     if !resp.status().is_success() {
         return Err(anyhow!("下载应用失败: HTTP {}", resp.status()));
     }

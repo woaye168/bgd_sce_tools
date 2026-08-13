@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
-import { check } from "@tauri-apps/plugin-updater";
 import { getVersion } from "@tauri-apps/api/app";
 import { api } from "../lib/api";
 import Card from "../components/Card";
 
-/** 关于页：版本信息 + 检查更新（自动更新） */
+/** 关于页：版本信息 + 检查更新（自建逻辑：私有仓库下 tauri updater 插件无法携带 token） */
 export default function AboutPage() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -19,16 +18,12 @@ export default function AboutPage() {
     setBusy(true);
     setMessage("正在检查更新...");
     try {
-      // 读取代理设置（留空则直连）
-      const settings = await api
-        .getAppSettings()
-        .catch(() => ({ proxy: "", watch_enabled: false }));
-      const proxy = settings.proxy?.trim();
-      const update = await check(proxy ? { proxy } : undefined);
-      if (update) {
-        setMessage(`发现新版本 ${update.version}，正在下载安装...`);
-        await update.downloadAndInstall();
-        setMessage("✔ 更新已下载，请重启应用完成安装");
+      const current = await getVersion();
+      const info = await api.checkSelfUpdate(current);
+      if (info.has_update) {
+        setMessage(`发现新版本 v${info.latest}，正在下载安装包...`);
+        await api.startSelfUpdate();
+        setMessage("✔ 安装器已启动，请按提示完成安装");
       } else {
         setMessage("✔ 已是最新版本");
       }

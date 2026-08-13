@@ -21,8 +21,9 @@ BGD 工作室 · 星火编辑器（SCE）Lua 框架构建工具（Windows 桌面
 - **监听更新**：文件级增量构建，修改秒级同步，删除自动清理产物，`api/` 目录变动自动重新生成注册聚合，emmyrc/gitignore 片段变动自动重新合并
 - **自动类型提示**：`api/` 目录丢入模块文件即注册到 `bgd_api`，EmmyLua 补全即刻生效
 - **框架增量更新**：三路哈希对比，你改过的文件不会被覆盖（冲突时本地保留 + 新版另存 `.framework-new` + 报告清单）
-- **配置设定**：`bgd_default.json`（框架下发）+ `bgd.json`（项目覆盖）双层配置；网络代理设置（对更新检查、框架下载生效）
-- **自我更新**：启动后可在【关于】页检查更新，自动下载安装新版本
+- **配置设定**：`bgd_default.json`（框架下发）+ `bgd.json`（项目覆盖）双层配置；网络代理与 GitHub Token 设置（对更新检查、框架下载、应用市场生效）
+- **私有仓库访问**：仓库已转私有，所有 GitHub 链路（框架下载/更新、应用市场、自我更新）通过应用设置里的 fine-grained PAT 认证
+- **自我更新**：启动后可在【关于】页检查更新，自动下载安装新版本（自建逻辑：认证查询最新 Release → 下载 NSIS 安装包 → 启动安装）
 - **界面**：侧边栏布局，明/暗主题切换，构建日志实时输出
 
 ## 下载安装
@@ -44,6 +45,17 @@ BGD 工作室 · 星火编辑器（SCE）Lua 框架构建工具（Windows 桌面
 
 GitHub 直连不稳定时：【设置】页 → "通用设置" → 填入本机代理（如 `http://127.0.0.1:7897`）→ 保存。对**检查更新、框架版本检查、框架下载**全部生效。
 
+### GitHub Token（必需，仓库已转私有）
+
+框架/插件/工具仓库均为**私有仓库**，首次使用必须配置 Token，否则框架下载/更新、应用市场、自我更新全部不可用：
+
+1. GitHub → Settings → Developer settings → Personal access tokens → **Fine-grained tokens** → Generate new token
+2. Repository access 选 **Only select repositories**，勾选 `bgd_sce_tools` / `bgd_sce_framework` / `bgd_sce_plugins` / `sce_app_visual-injector`
+3. Permissions 只需 **Contents: Read-only**
+4. 生成后填入：【设置】页 → "通用设置" → GitHub Token → 保存（或 CLI：`bgd_sce_tools setting set github_token <PAT>`）
+
+Token 仅存于本机应用设置（settings.json），不会写入任何项目或仓库。
+
 ### 界面导览
 
 | 页面 | 功能 |
@@ -51,7 +63,7 @@ GitHub 直连不稳定时：【设置】页 → "通用设置" → 填入本机�
 | 项目 | 选择/切换项目、最近项目列表、初始化新项目、显示框架版本 |
 | 构建 | 全量构建、清除构建、清理日志，实时构建输出 |
 | 监听 | 监听开关，文件变更事件流实时显示 |
-| 设置 | 通用设置（代理）、框架设置（更新）、`bgd.json` 构建路径配置 |
+| 设置 | 通用设置（代理 / GitHub Token）、框架设置（更新）、`bgd.json` 构建路径配置 |
 | 关于 | 版本信息、检查更新（自动下载安装） |
 
 ## 技术栈与项目结构
@@ -72,7 +84,9 @@ GitHub 直连不稳定时：【设置】页 → "通用设置" → 填入本机�
 │   ├── src/builder.rs          # 构建核心（全量/增量/清理/监听/API聚合生成）
 │   ├── src/project.rs          # 初始化/框架下载更新/最近项目/应用设置
 │   ├── src/config.rs           # bgd.json 读写
-│   ├── tauri.conf.json         # 应用配置（含 updater 端点与公钥）
+│   ├── src/net.rs              # 统一 HTTP 客户端（代理 + GitHub Token 认证）
+│   ├── src/updater.rs          # 自我更新（私有仓库：认证查 Release + 下载安装包）
+│   ├── tauri.conf.json         # 应用配置
 │   └── capabilities/           # 权限声明
 └── .github/workflows/
     ├── ci.yml                  # push/PR：前端构建 + cargo check/test
@@ -115,6 +129,7 @@ bgd_sce_tools init --project <路径> [--force]        # 初始化项目
 bgd_sce_tools update-framework --project <路径>      # 增量更新框架
 bgd_sce_tools check-framework --project <路径>       # 检查框架更新
 bgd_sce_tools check-watch --project <项目路径>       # 判断是否监听中
+bgd_sce_tools setting set github_token <PAT>         # 写入 GitHub Token（私有仓库必需）
 # 可选参数：--repo owner/repo  --proxy http://127.0.0.1:7897  --log <日志路径>
 ```
 
@@ -175,9 +190,9 @@ git tag -a v0.1.4
 git push origin v0.1.4
 ```
 
-`release.yml` 会自动：安装依赖 → 构建前端 → cargo 编译 → 打包 NSIS 安装包 → 用 Secrets 里的私钥签名 → 创建 GitHub Release 并上传 `setup.exe`、`setup.exe.sig`、`latest.json`。
+`release.yml` 会自动：安装依赖 → 构建前端 → cargo 编译 → 打包 NSIS 安装包 → 创建 GitHub Release 并上传 `setup.exe`。
 
-老版本用户打开工具点"检查更新"即可自动升级（updater 读取 `releases/latest/download/latest.json`）。
+老版本用户打开工具点"检查更新"即可自动升级（自建更新逻辑：认证读取最新 Release 的 `*-setup.exe` asset，下载后启动安装器）。
 
 `ci.yml` 在每次 push/PR 时做基本验证（前端构建 + cargo check/test）。
 
