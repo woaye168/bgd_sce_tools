@@ -208,12 +208,12 @@ git push origin v0.1.4
 
 工具的构建引擎（`src-tauri/src/builder.rs`）实现以下规则，与框架仓库的约定一一对应：
 
-1. **白名单构建**：code set 根下仅 `server/`、`client/`、`common/`、`res/`、`entrance/` 进产物流程；根级文件（init.lua、bgd_default.json、.emmyrc.json、.gitignore、doc/）各有专门流程
-2. **模块名改写**：复制 `.lua` 时，把引号内的 `src.` / `libs.` 前缀改写为运行时根名（`bgd_game_server.` / `bgd_game_client.` / `bgd_libs_server.` / `bgd_libs_client.`，取自配置的 target 目录名）
+1. **白名单构建**：code set 根下仅 `server/`、`client/`、`common/`、`res/`、`entrance/` 进产物流程；根级文件（init.lua、bgd_default.json、.emmyrc.json、.gitignore、AGENTS.md、doc/）各有专门流程
+2. **模块名改写**：复制 `.lua` 时，把引号内的 `src.` / `libs.` 前缀改写为运行时根名（`bgd_game_server.` / `bgd_game_client.` / `bgd_libs_server.` / `bgd_libs_client.`，取自配置的 target 目录名）；裸 `require('src')` / `require('libs')` 同样改写为对应运行时根
 3. **端拆分**：`server/` → 仅服务端产物，`client/` → 仅客户端产物，`common/` → 双端各一份
 4. **API 自动注册**：扫描 `{libs,src}/{common,server,client}/api/*.lua`，在源码树内重新生成聚合 `init.lua`（框架用 `bgd_api.<端> = {}` 新建，游戏用 `or {}` 合并）
 5. **入口合并（分界标记）**：`src/main.lua` 标记之前的内容视为原文永久保留，标记之后为 `libs/entrance/` + `src/entrance/` 的合并产物；重复构建幂等，「清除构建」还原原文
-6. **配置合并**：`libs/.emmyrc.json` + `src/.emmyrc.json` 深合并生成项目根配置（数组并集、标量游戏侧优先）；`.gitignore` 同理（文本拼接去重）
+6. **配置合并**：`libs/.emmyrc.json` + `src/.emmyrc.json` 深合并生成项目根配置（数组并集、标量游戏侧优先）；`.gitignore` 同理（文本拼接去重）；项目根 `AGENTS.md` 由 `src/AGENTS.md` 同步生成（构建/监听/初始化时，内容一致则跳过），要改就改 `.bgd/src/AGENTS.md`
 7. **init 渲染**：code set 根 `init.lua` 渲染 `{{target}}` / `{{module}}` / `{{time}}` 后输出到产物根目录
 8. **资源系统**：`res/` 目录五类资源（image/particle/sound/spine/sprites）同步到引擎目录；`.lua` 中 `'libs/res/<类型>/...'` / `'src/res/<类型>/...'` 构建时替换为运行时路径（sound 去 `.ogg`，sprites 前缀 `@<ProjectName>`）
 9. **配置 overlay**：生效配置 = `libs/bgd_default.json`（框架下发）逐 key 被 `.bgd/bgd.json`（项目覆盖）覆盖

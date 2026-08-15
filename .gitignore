@@ -9,3 +9,6 @@ src-tauri/gen/
 # 系统
 Thumbs.db
 .DS_Store
+
+# 其他
+bgd_sce_tools.code-workspace

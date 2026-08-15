@@ -79,8 +79,9 @@ src-tauri/src/
 
 - **私有仓库认证（GitHub Token）**：四个仓库均为私有，所有 GitHub 请求（api.github.com / codeload / raw.githubusercontent / release asset API）必须走 `net.rs` 的 `http_client(proxy, token)`，token 来自应用设置 `github_token`（fine-grained PAT，Contents 只读）。token 为空时不加头（兼容公开仓库）。**禁止**绕过 net.rs 自建 reqwest 客户端。
 - **release asset 下载**：私有仓库的 asset 直链（releases/download/...）带 token 也 404，必须走 API：`repos/<repo>/releases/tags/<tag>` 定位 asset → `asset.url` + `Accept: application/octet-stream` 下载（插件安装与自我更新均如此）。
-- **静态 require 改写**：源码写真实路径（`require('src.xxx')`），构建时引号内前缀改写为运行时根名（`bgd_game_server.` 等）。**禁止**恢复字符串拼接构造 require 路径。
-- **白名单构建**：code set 根下仅 `server/client/common/res/entrance` 进产物；根级文件（init.lua、bgd_default.json、.emmyrc.json、.gitignore、doc/）各有专门流程。
+- **静态 require 改写**：源码写真实路径（`require('src.xxx')`，含裸 `require('src')` / `require('libs')`），构建时引号内前缀改写为运行时根名（`bgd_game_server.` 等）。**禁止**恢复字符串拼接构造 require 路径。
+- **白名单构建**：code set 根下仅 `server/client/common/res/entrance` 进产物；根级文件（init.lua、bgd_default.json、.emmyrc.json、.gitignore、AGENTS.md、doc/）各有专门流程。
+- **AGENTS.md 同步**：项目根 `AGENTS.md` 由 `.bgd/src/AGENTS.md` 在初始化/构建/监听时同步生成（`sync_agents_md`，内容一致跳过），与 .gitignore 同属构建产物。
 - **资源系统**：`res/` 目录五类资源（image/particle/sound/spine/sprites）同步到引擎目录；`.lua` 中字符串字面量 `'libs/res/<类型>/...'` / `'src/res/<类型>/...'` 在构建时替换为运行时路径（sound 去 `.ogg` 扩展名，sprites 前缀 `@<ProjectName>` 从 map_settings.json 注入）。
 - **入口合并分界标记**：`src/main.lua` 标记之前为编辑器原文永久保留；之后为合并产物。原文若仍含标记（脏数据）则丢弃重建（自愈）。
 - **配置 overlay**：`libs/bgd_default.json`（框架下发）逐 key 被 `.bgd/bgd.json`（项目覆盖）覆盖；保存只写差异。

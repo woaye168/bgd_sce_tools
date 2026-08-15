@@ -144,13 +144,24 @@ pub fn rewrite_lua(content: &str, side: &str, cfg: &BgdConfig) -> String {
         .to_string_lossy()
         .into_owned();
 
-    let re_libs = Regex::new(r#"(['"])libs\."#).unwrap();
+    // 'libs.xxx' / 'libs' 两种形式都要改写（裸 require('libs') 加载运行时根）
+    let re_libs = Regex::new(r#"(['"])libs(['".])"#).unwrap();
     let content = re_libs.replace_all(content, |caps: &Captures| {
-        format!("{}{}.", &caps[1], libs_root)
+        if &caps[2] == "." {
+            format!("{}{}.", &caps[1], libs_root)
+        } else {
+            format!("{}{}{}", &caps[1], libs_root, &caps[2])
+        }
     });
-    let re_src = Regex::new(r#"(['"])src\."#).unwrap();
+    let re_src = Regex::new(r#"(['"])src(['".])"#).unwrap();
     re_src
-        .replace_all(&content, |caps: &Captures| format!("{}{}.", &caps[1], game_root))
+        .replace_all(&content, |caps: &Captures| {
+            if &caps[2] == "." {
+                format!("{}{}.", &caps[1], game_root)
+            } else {
+                format!("{}{}{}", &caps[1], game_root, &caps[2])
+            }
+        })
         .into_owned()
 }
 
@@ -719,6 +730,23 @@ pub fn merge_gitignore(bgd_root: &Path, cfg: &BgdConfig, log: &LogFn) -> Result<
     Ok(())
 }
 
+/// src/AGENTS.md -> 项目根 AGENTS.md（与 .gitignore 同策略：构建产物，要改就改 .bgd/src/AGENTS.md）
+/// 源不存在则不动根文件；内容一致则跳过写入（避免监听触发无意义刷盘）
+pub fn sync_agents_md(bgd_root: &Path, cfg: &BgdConfig, log: &LogFn) -> Result<()> {
+    let src_f = cfg.abs(bgd_root, &cfg.game_dir).join("AGENTS.md");
+    if !src_f.exists() {
+        return Ok(());
+    }
+    let out = bgd_root.parent().unwrap_or(bgd_root).join("AGENTS.md");
+    let content = fs::read(&src_f)?;
+    if out.exists() && fs::read(&out)? == content {
+        return Ok(());
+    }
+    fs::write(&out, content)?;
+    log("[ok] sync: AGENTS.md <- src/AGENTS.md");
+    Ok(())
+}
+
 // ---------------------------------------------------------------- 全量构建 / 清理
 
 pub fn build_code_set(code_set: &str, bgd_root: &Path, cfg: &BgdConfig, log: &LogFn) -> Result<usize> {
@@ -753,6 +781,7 @@ pub fn build_all(bgd_root: &Path, cfg: &BgdConfig, log: &LogFn) -> Result<()> {
     update_entrance("client", bgd_root, cfg, log)?;
     merge_emmyrc(bgd_root, cfg, log)?;
     merge_gitignore(bgd_root, cfg, log)?;
+    sync_agents_md(bgd_root, cfg, log)?;
     log(&format!(
         "===== 构建完成！框架文件: {libs_count}，游戏文件: {game_count} ====="
     ));
@@ -881,6 +910,11 @@ fn handle_file(path: &Path, deleted: bool, bgd_root: &Path, cfg: &BgdConfig, log
     }
     if rel == "/.gitignore" {
         let _ = merge_gitignore(bgd_root, cfg, log);
+        return;
+    }
+    // src/AGENTS.md：同步到项目根
+    if rel == "/AGENTS.md" && code_set == "game" {
+        let _ = sync_agents_md(bgd_root, cfg, log);
         return;
     }
     // entrance 文件：重新合并入口
