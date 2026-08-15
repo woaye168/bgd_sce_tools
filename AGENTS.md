@@ -87,6 +87,7 @@ src-tauri/src/
 - **配置 overlay**：`libs/bgd_default.json`（框架下发）逐 key 被 `.bgd/bgd.json`（项目覆盖）覆盖；保存只写差异。
 - **三路哈希增量更新**：基准存 `.bgd/.framework_state.json`；冲突时本地保留 + 新版另存 `.framework-new`。文本文件统一 LF 后哈希（防 CRLF 误报）。
 - **监听去重**：同一文件 300ms 窗口聚合一次处理（防编辑器原子保存产生重复日志）。
+- **应用市场**：`apps.rs`（registry 拉取/安装/卸载）+ `AppPage.tsx`（UI）。安装即覆盖写入 `apps/<id>/`，升级不单独设命令——前端对比 registry 与本地 app.json 版本号，有新版显示「升级」按钮，点击走 `install_app` 覆盖。启动应用时自动透传 `--project-path <当前项目>`（子应用可选实现该参数）。
 
 ## 测试与验证流程（本地闭环）
 

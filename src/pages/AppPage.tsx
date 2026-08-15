@@ -43,6 +43,28 @@ export default function AppPage() {
 
   const isInstalled = (id: string) => installed.some((a) => a.id === id);
 
+  /** 已安装版本（未安装返回 undefined） */
+  const installedVersion = (id: string) =>
+    installed.find((a) => a.id === id)?.version;
+
+  /** 比较版本号：a > b 返回 1，相等 0，a < b 返回 -1（按数字段比较） */
+  const compareVersion = (a: string, b: string): number => {
+    const pa = a.split(".").map((n) => parseInt(n, 10) || 0);
+    const pb = b.split(".").map((n) => parseInt(n, 10) || 0);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+      const x = pa[i] ?? 0;
+      const y = pb[i] ?? 0;
+      if (x !== y) return x > y ? 1 : -1;
+    }
+    return 0;
+  };
+
+  /** 清单版本高于已安装版本 → 可升级 */
+  const hasUpdate = (app: AppInfo): boolean => {
+    const v = installedVersion(app.id);
+    return v !== undefined && compareVersion(app.version, v) > 0;
+  };
+
   const install = async (app: AppInfo) => {
     setBusyId(app.id);
     setMessage(`正在安装 ${app.name}...`);
@@ -153,7 +175,19 @@ export default function AppPage() {
                 <div className="ml-4 flex shrink-0 items-center gap-2">
                   {isInstalled(app.id) ? (
                     <>
-                      <span className="text-sm text-emerald-500">已安装</span>
+                      {hasUpdate(app) ? (
+                        <button
+                          onClick={() => install(app)}
+                          disabled={busyId === app.id}
+                          className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm text-white hover:bg-amber-500 disabled:opacity-50"
+                        >
+                          {busyId === app.id
+                            ? "处理中..."
+                            : `升级 v${installedVersion(app.id)} → v${app.version}`}
+                        </button>
+                      ) : (
+                        <span className="text-sm text-emerald-500">已安装</span>
+                      )}
                       <button
                         onClick={() =>
                           uninstall({
