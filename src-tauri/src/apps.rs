@@ -171,3 +171,50 @@ pub fn list_installed() -> Result<Vec<InstalledApp>> {
     }
     Ok(apps)
 }
+
+// ---------------------------------------------------------------- 自启动（随主程序静默启动，0.6.6）
+
+/// 应用是否已在运行（按 exe 全路径匹配进程，兼容大小写与斜杠）
+pub fn is_app_running(exe: &std::path::Path) -> bool {
+    let want = exe.display().to_string().replace('/', "\\").to_lowercase();
+    let Ok(out) = std::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            "Get-CimInstance Win32_Process | Select-Object ProcessId,ExecutablePath | ConvertTo-Json -Compress",
+        ])
+        .output()
+    else {
+        return false;
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    let Ok(doc) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return false;
+    };
+    let list = match &doc {
+        serde_json::Value::Array(a) => a.clone(),
+        serde_json::Value::Object(_) => vec![doc],
+        _ => return false,
+    };
+    list.iter().any(|p| {
+        p["ExecutablePath"]
+            .as_str()
+            .map(|s| s.to_lowercase() == want)
+            .unwrap_or(false)
+    })
+}
+
+/// 随主程序静默启动配置的应用（单开：已在运行跳过；有当前项目则透传 --project-path）
+pub fn autostart_apps(ids: &[String], project: Option<&std::path::Path>) {
+    for id in ids {
+        let Ok(exe) = app_exe_path(id) else { continue };
+        if !exe.is_file() || is_app_running(&exe) {
+            continue;
+        }
+        let mut cmd = std::process::Command::new(&exe);
+        if let Some(p) = project {
+            cmd.arg("--project-path").arg(p);
+        }
+        let _ = cmd.spawn();
+    }
+}

@@ -3,8 +3,6 @@
 pub mod apps;
 pub mod builder;
 pub mod config;
-pub mod editor;
-pub mod mcp;
 pub mod net;
 pub mod project;
 pub mod updater;
@@ -426,12 +424,15 @@ fn get_installed_apps() -> Result<Vec<apps::InstalledApp>, String> {
     apps::list_installed().map_err(|e| e.to_string())
 }
 
-/// 启动应用 EXE（有当前项目则传 --project-path）
+/// 启动应用 EXE（有当前项目则传 --project-path；单开：已在运行不重复拉起）
 #[tauri::command]
 fn start_app(state: State<AppState>, app_id: String) -> Result<(), String> {
     let app_exe = apps::app_exe_path(&app_id).map_err(|e| e.to_string())?;
     if !app_exe.is_file() {
         return Err(format!("应用 {app_id} 未安装"));
+    }
+    if apps::is_app_running(&app_exe) {
+        return Err(format!("应用 {app_id} 已在运行（单开限制）"));
     }
     let mut cmd = std::process::Command::new(app_exe);
     // 有当前项目则传 --project-path（应用可选实现）
@@ -473,11 +474,23 @@ pub fn run() {
         .setup(|app| {
             // 确保安装目录在用户 PATH（CLI 可用）
             ensure_path_registered();
-            // 启动恢复：默认选中最近项目；若上次监听为开则自动开启
             let handle = app.handle().clone();
             let Ok(dir) = handle.path().app_config_dir() else {
                 return Ok(());
             };
+            // 自启动应用（0.6.6）：随主程序静默启动配置的应用（单开，已在运行跳过）
+            {
+                let settings = project::load_settings(&dir);
+                if !settings.auto_start_apps.is_empty() {
+                    let proj = project::load_recent(&dir)
+                        .projects
+                        .first()
+                        .map(PathBuf::from)
+                        .filter(|p| p.is_dir());
+                    apps::autostart_apps(&settings.auto_start_apps, proj.as_deref());
+                }
+            }
+            // 启动恢复：默认选中最近项目；若上次监听为开则自动开启
             let recent = project::load_recent(&dir);
             let Some(first) = recent.projects.first() else {
                 return Ok(());

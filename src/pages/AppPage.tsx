@@ -14,6 +14,27 @@ export default function AppPage() {
   const [installed, setInstalled] = useState<InstalledApp[]>([]);
   const [message, setMessage] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [autoStart, setAutoStart] = useState<string[]>([]);
+
+  useEffect(() => {
+    api
+      .getAppSettings()
+      .then((s) => setAutoStart(s.auto_start_apps ?? []))
+      .catch(() => {});
+  }, []);
+
+  /** 切换应用「随主程序启动」（静默启动；单开：已在运行不重复拉起） */
+  const toggleAutoStart = async (id: string, on: boolean) => {
+    const next = on ? [...autoStart, id] : autoStart.filter((x) => x !== id);
+    setAutoStart(next);
+    try {
+      const s = await api.getAppSettings();
+      await api.saveAppSettings({ ...s, auto_start_apps: next });
+      setMessage(on ? `✔ 已设置随主程序启动` : `✔ 已取消随主程序启动`);
+    } catch (e) {
+      setMessage(`✘ 保存自启动配置失败: ${String(e)}`);
+    }
+  };
 
   const refreshInstalled = useCallback(async () => {
     try {
@@ -131,7 +152,15 @@ export default function AppPage() {
                     </p>
                   )}
                 </div>
-                <div className="ml-4 shrink-0">
+                <div className="ml-4 flex shrink-0 items-center gap-3">
+                  <label className="flex cursor-pointer items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
+                    <input
+                      type="checkbox"
+                      checked={autoStart.includes(app.id)}
+                      onChange={(e) => toggleAutoStart(app.id, e.target.checked)}
+                    />
+                    随主程序启动
+                  </label>
                   <button
                     onClick={() => open(app)}
                     disabled={busyId === app.id}

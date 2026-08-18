@@ -6,7 +6,7 @@ import Card from "../components/Card";
 /** 设置页：通用设置（代理）、项目配置（bgd.json 表单）、框架更新 */
 export default function SettingsPage() {
   const [config, setConfig] = useState<BgdConfig | null>(null);
-  const [appSettings, setAppSettings] = useState<AppSettings>({ proxy: "", watch_enabled: false, save_log: false, github_token: "", editor_exe_name: "星火编辑器.exe" });
+  const [appSettings, setAppSettings] = useState<AppSettings>({ proxy: "", watch_enabled: false, save_log: false, github_token: "", auto_start_apps: [] });
   const [updateInfo, setUpdateInfo] = useState<FrameworkUpdateInfo | null>(null);
   const [report, setReport] = useState<UpdateReport | null>(null);
   const [message, setMessage] = useState("");

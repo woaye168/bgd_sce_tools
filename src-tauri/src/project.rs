@@ -27,13 +27,9 @@ pub struct AppSettings {
     /// GitHub Token（fine-grained PAT，Contents 只读；私有仓库的框架/插件/自我更新均需要）
     #[serde(default)]
     pub github_token: String,
-    /// 星火编辑器 exe 名（0.5.3 场景一 editor_start 用；防用户把 exe 改名，默认 星火编辑器.exe）
-    #[serde(default = "default_editor_exe_name")]
-    pub editor_exe_name: String,
-}
-
-fn default_editor_exe_name() -> String {
-    "星火编辑器.exe".to_string()
+    /// 随主程序静默启动的应用 id 列表（0.6.6 起；单开：已在运行不重复拉起）
+    #[serde(default)]
+    pub auto_start_apps: Vec<String>,
 }
 
 /// 应用配置目录（GUI/CLI/MCP 共用约定：%APPDATA%/com.bgd.sce-tools）

@@ -78,8 +78,8 @@ export interface AppSettings {
   save_log: boolean;
   /** GitHub Token（fine-grained PAT，Contents 只读；私有仓库的框架/插件/自我更新均需要） */
   github_token: string;
-  /** 星火编辑器 exe 名（editor start 用，默认 星火编辑器.exe，防用户改名） */
-  editor_exe_name: string;
+  /** 随主程序静默启动的应用 id 列表（单开：已在运行不重复拉起） */
+  auto_start_apps: string[];
 }
 
 /** 自我更新检查结果 */
