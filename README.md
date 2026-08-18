@@ -25,6 +25,7 @@ BGD 工作室 · 星火编辑器（SCE）Lua 框架构建工具（Windows 桌面
 - **私有仓库访问**：仓库已转私有，所有 GitHub 链路（框架下载/更新、应用市场、自我更新）通过应用设置里的 fine-grained PAT 认证
 - **自我更新**：启动后可在【关于】页检查更新，自动下载安装新版本（自建逻辑：认证查询最新 Release → 下载 NSIS 安装包 → 启动安装）
 - **应用市场**：安装/升级/卸载独立应用（如模块To触编、编辑器补丁）；清单版本高于已安装版本时显示「升级」按钮，一键覆盖更新
+- **AI 开发调试链路（MCP）**：`bgd_sce_tools mcp` stdio 聚合服务是 AGENT 的唯一 MCP 入口——启动/关闭编辑器、启动/停止调试、获取日志、发布项目、截取游戏画面（编辑器侧能力由「编辑器补丁」应用的 bgd_mcp_bridge 提供，在线自动透传）
 - **界面**：侧边栏布局，明/暗主题切换，构建日志实时输出
 
 ## 下载安装
@@ -139,6 +140,11 @@ bgd_sce_tools update-framework --project <路径>      # 增量更新框架
 bgd_sce_tools check-framework --project <路径>       # 检查框架更新
 bgd_sce_tools check-watch --project <项目路径>       # 判断是否监听中
 bgd_sce_tools setting set github_token <PAT>         # 写入 GitHub Token（私有仓库必需）
+bgd_sce_tools setting set editor_exe_name <名字>     # 编辑器 exe 名（默认 星火编辑器.exe）
+bgd_sce_tools editor start --project <项目路径>      # 启动星火编辑器（等待 MCP 桥上线）
+bgd_sce_tools editor stop --project <项目路径>       # 关闭星火编辑器（直接结束进程）
+bgd_sce_tools logs [client|server|bridge|all] [行数] # 最新日志文件信息（行数 0=只给路径与文件信息）
+bgd_sce_tools mcp                                    # stdio MCP 聚合服务（AI 客户端配置入口）
 # 可选参数：--repo owner/repo  --proxy http://127.0.0.1:7897  --log <日志路径>
 ```
 

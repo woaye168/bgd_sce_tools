@@ -25,9 +25,13 @@ bgd_sce_tools CLI
   check-watch            检查项目当前是否处于监听中
   config get <键>        读取 bgd 配置（合并后生效值）
   config set <键> <值>   写入 bgd.json 覆盖项（数组用 JSON 数组形式）
-  setting get <键>       读取应用设置（proxy / watch_enabled / github_token）
+  setting get <键>       读取应用设置（proxy / watch_enabled / github_token / editor_exe_name）
   setting set <键> <值>  写入应用设置
   app <应用id>           启动已安装的应用 EXE（透传 --project-path）
+  editor start           启动星火编辑器（等待 MCP 桥上线；幂等）
+  editor stop            关闭星火编辑器（直接结束进程）
+  logs [源] [行数]       获取最新日志文件信息（源: client/server/bridge/all；行数 0=不取内容）
+  mcp                    启动 stdio MCP 聚合服务（AI 客户端配置入口，前台阻塞）
 
 选项:
   --project <路径>        项目根目录（缺省为当前目录）
@@ -208,7 +212,7 @@ fn set_config_field(cfg: &mut BgdConfig, key: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
-const CMDS: [&str; 11] = [
+const CMDS: [&str; 14] = [
     "build",
     "watch",
     "clean",
@@ -220,6 +224,9 @@ const CMDS: [&str; 11] = [
     "config",
     "setting",
     "app",
+    "editor",
+    "logs",
+    "mcp",
 ];
 
 /// 是否命中 CLI 调用（供 main 决定是否 AttachConsole）
@@ -351,9 +358,10 @@ pub fn run() -> i32 {
                                 settings.watch_enabled = matches!(value.as_str(), "true" | "1" | "yes")
                             }
                             "github_token" => settings.github_token = value.clone(),
+                            "editor_exe_name" => settings.editor_exe_name = value.clone(),
                             other => {
                                 return Err(anyhow::anyhow!(
-                                    "未知设置键: {other}（可用: proxy / watch_enabled / github_token）"
+                                    "未知设置键: {other}（可用: proxy / watch_enabled / github_token / editor_exe_name）"
                                 ))
                             }
                         }
@@ -377,6 +385,49 @@ pub fn run() -> i32 {
                 cmd.arg("--project-path").arg(&cli.project);
                 cmd.spawn().with_context(|| format!("启动应用失败: {}", app_exe.display()))?;
                 logger.log(&format!("已启动应用: {app_id}（--project-path {}）", cli.project.display()));
+            }
+            "editor" => {
+                let sub = cli.extra.first().cloned().unwrap_or_default();
+                let exe_name = {
+                    let s = project::load_settings(&app_config_dir()?);
+                    if s.editor_exe_name.trim().is_empty() {
+                        bgd_sce_tools_lib::editor::DEFAULT_EDITOR_EXE.to_string()
+                    } else {
+                        s.editor_exe_name
+                    }
+                };
+                match sub.as_str() {
+                    "start" => {
+                        let r = bgd_sce_tools_lib::editor::editor_start(
+                            &cli.project,
+                            &exe_name,
+                            true,
+                            120_000,
+                        )?;
+                        logger.log(&serde_json::to_string_pretty(&r)?);
+                    }
+                    "stop" => {
+                        let r = bgd_sce_tools_lib::editor::editor_stop(&cli.project, &exe_name)?;
+                        logger.log(&serde_json::to_string_pretty(&r)?);
+                    }
+                    other => {
+                        return Err(anyhow::anyhow!("未知 editor 子命令: {other}（start/stop）"))
+                    }
+                }
+            }
+            "logs" => {
+                let source = cli.extra.first().cloned().unwrap_or_else(|| "all".to_string());
+                let tail: usize = cli
+                    .extra
+                    .get(1)
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0);
+                let r = bgd_sce_tools_lib::editor::get_logs(&cli.project, &source, tail)?;
+                logger.log(&serde_json::to_string_pretty(&r)?);
+            }
+            "mcp" => {
+                // stdio MCP 主循环（阻塞直到客户端断开/stdin EOF），直接以其返回码退出
+                std::process::exit(bgd_sce_tools_lib::mcp::run_stdio());
             }
             _ => unreachable!(),
         }

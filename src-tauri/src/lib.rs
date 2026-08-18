@@ -3,6 +3,8 @@
 pub mod apps;
 pub mod builder;
 pub mod config;
+pub mod editor;
+pub mod mcp;
 pub mod net;
 pub mod project;
 pub mod updater;

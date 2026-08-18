@@ -43,8 +43,12 @@ bgd_sce_tools check-framework --project <路径> [--proxy http://...]
 bgd_sce_tools check-watch --project <项目路径>       # 判断是否监听中
 bgd_sce_tools config get <键> --project <项目路径>   # 读取 bgd 配置（合并后生效值）
 bgd_sce_tools config set <键> <值> --project <路径>  # 写入 bgd.json 覆盖项
-bgd_sce_tools setting get <键>                       # 读取应用设置（proxy / watch_enabled / github_token）
+bgd_sce_tools setting get <键>                       # 读取应用设置（proxy / watch_enabled / github_token / editor_exe_name）
 bgd_sce_tools setting set <键> <值>                  # 写入应用设置
+bgd_sce_tools editor start --project <项目路径>      # 启动星火编辑器（等待 MCP 桥上线，幂等）
+bgd_sce_tools editor stop --project <项目路径>       # 关闭星火编辑器（taskkill /T /F 直接结束进程）
+bgd_sce_tools logs [client|server|bridge|all] [行数] # 最新日志文件信息（行数 0=只给路径+文件信息）
+bgd_sce_tools mcp                                    # stdio MCP 聚合服务（AGENT 的唯一 MCP 入口）
 ```
 
 `--log <路径>` 会把过程日志同时写入文件（无 GUI 环境查看结果）；`check-watch` 通过项目 `.bgd/.watch_state.json` + PID 校验判断监听状态（该文件由 GUI 监听开关维护，已加入框架 .gitignore）；`config`/`setting` 子命令分别读写项目 bgd.json 覆盖项与应用设置，供 CLI 和自动化脚本使用。
@@ -73,6 +77,8 @@ src-tauri/src/
   builder.rs                # 构建核心：白名单构建/增量/清理/API聚合/init渲染/入口合并/配置合并/监听去重
   project.rs                # 初始化(含锁)/框架下载/三路哈希增量更新/最近项目/应用设置
   config.rs                 # bgd.json overlay 读写（bgd_default.json 基底 + bgd.json 覆盖）
+  editor.rs                 # 编辑器生命周期与日志：轻量 locate 链/editor start·stop/get_logs/桥接调用（0.5.3）
+  mcp.rs                    # stdio MCP 聚合服务（NDJSON；本地 editor/logs + 在线透传 bgd_mcp_bridge）
 ```
 
 ## 关键机制（改代码前必读）
@@ -88,6 +94,7 @@ src-tauri/src/
 - **三路哈希增量更新**：基准存 `.bgd/.framework_state.json`；冲突时本地保留 + 新版另存 `.framework-new`。文本文件统一 LF 后哈希（防 CRLF 误报）。
 - **监听去重**：同一文件 300ms 窗口聚合一次处理（防编辑器原子保存产生重复日志）。
 - **应用市场**：`apps.rs`（registry 拉取/安装/卸载）+ `AppPage.tsx`（UI）。安装即覆盖写入 `apps/<id>/`，升级不单独设命令——前端对比 registry 与本地 app.json 版本号，有新版显示「升级」按钮，点击走 `install_app` 覆盖。启动应用时自动透传 `--project-path <当前项目>`（子应用可选实现该参数）。
+- **MCP 聚合服务（0.5.3 场景一）**：`mcp.rs` stdio NDJSON 服务（`bgd_sce_tools mcp`，MCP 客户端按需拉起），恒定 8 工具：editor_start/editor_stop/get_logs 本地实现（`editor.rs`），start_debug（默认 restart_last_debug，失败回退全量）/stop_debug/publish_project/capture_game/get_status 在线透传编辑器内 bgd_mcp_bridge（HTTP，端口读 `<运行根>/logs/bgd_csharp/port` 文件，离线报「请先 editor_start」）。**轻量 locate 链**（map_settings api_version + tsconfig typeRoots → 运行根）与 sce_app_editor-patch 的 locate.rs 同源但独立维护（两仓库不互相引用）。编辑器 exe 名走应用设置 `editor_exe_name`（默认 星火编辑器.exe）。编辑器侧方案详见 sce_app_editor-patch 仓库 doc/requirements/0.5.3.md 与 doc/research/。
 
 ## 测试与验证流程（本地闭环）
 

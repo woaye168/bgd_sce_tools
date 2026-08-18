@@ -27,6 +27,23 @@ pub struct AppSettings {
     /// GitHub Token（fine-grained PAT，Contents 只读；私有仓库的框架/插件/自我更新均需要）
     #[serde(default)]
     pub github_token: String,
+    /// 星火编辑器 exe 名（0.5.3 场景一 editor_start 用；防用户把 exe 改名，默认 星火编辑器.exe）
+    #[serde(default = "default_editor_exe_name")]
+    pub editor_exe_name: String,
+}
+
+fn default_editor_exe_name() -> String {
+    "星火编辑器.exe".to_string()
+}
+
+/// 应用配置目录（GUI/CLI/MCP 共用约定：%APPDATA%/com.bgd.sce-tools）
+pub fn app_config_dir() -> Result<PathBuf> {
+    let dir = std::env::var("APPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir())
+        .join("com.bgd.sce-tools");
+    fs::create_dir_all(&dir)?;
+    Ok(dir)
 }
 
 pub fn load_settings(app_data_dir: &Path) -> AppSettings {
