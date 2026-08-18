@@ -479,6 +479,268 @@ pub fn get_logs(project_root: &Path, source: &str, tail_lines: usize) -> Result<
     Ok(json!({ "logs_root": logs_root.display().to_string(), "logs": out }))
 }
 
+// ---------------------------------------------------------------- capture_editor_window（WGC 整窗截图）
+
+/// 截取调试游戏画面（纯游戏画面+游戏 UI，不含编辑器界面）。
+/// 0.5.3 修订方案（实测校准）：
+/// 1. 编辑器主区是引擎渲染的 SDL 窗口（编辑器 UI 由 base.ui 引擎 UI 绘制），PIE 视口是
+///    base.ui 控件树里的 viewport 控件——lua 桥 `get_game_view_rect` 读其
+///    get_screen_rect()（引擎 UI 逻辑坐标）+ 逻辑分辨率；
+/// 2. 本机 WGC 截取编辑器 SDL 内容窗口，按「客户区物理/逻辑」比例换算裁剪框并 GPU 裁剪。
+/// （引擎 snapshot_scene_callback 只截 3D 场景、不含游戏 UI，对「验证 UI」不成立，仅留作 lua.capture_game 兜底。）
+/// 要求编辑器窗口未最小化；需在线（桥提供视口矩形）。
+#[cfg(windows)]
+pub fn capture_editor_window(project_root: &Path, exe_name: &str) -> Result<Value> {
+    let target = locate(project_root)?;
+    let port = online_port(&target)
+        .ok_or_else(|| anyhow!("编辑器不在线（MCP 桥不可达）。请先 editor_start 启动编辑器"))?;
+
+    // 1. lua 桥取 PIE 视口逻辑矩形 + 逻辑分辨率
+    let rect = bridge_invoke(port, "lua.get_game_view_rect", json!({}), 15_000)?;
+    let rx = rect["x"].as_f64().unwrap_or(0.0);
+    let ry = rect["y"].as_f64().unwrap_or(0.0);
+    let rw = rect["width"].as_f64().unwrap_or(0.0);
+    let rh = rect["height"].as_f64().unwrap_or(0.0);
+    let lw = rect["logical_width"].as_f64().unwrap_or(0.0);
+    let lh = rect["logical_height"].as_f64().unwrap_or(0.0);
+    if rw < 10.0 || rh < 10.0 || lw < 1.0 || lh < 1.0 {
+        return Err(anyhow!("游戏视口矩形异常: {rect}（游戏未在调试？）"));
+    }
+
+    // 2. 找编辑器 SDL 内容窗口（编辑器进程的顶层 SDL_app 窗口，面积最大者）
+    let pid = bridge_rpc(port, "server_info", json!({}), 10_000)
+        .ok()
+        .and_then(|v| v["pid"].as_u64())
+        .map(|p| p as u32)
+        .or_else(|| find_editor_pid(&exe_path_str(&target, exe_name)))
+        .ok_or_else(|| anyhow!("找不到编辑器进程"))?;
+    let win = find_editor_sdl_window(pid)
+        .ok_or_else(|| anyhow!("找不到编辑器 SDL 内容窗口（pid={pid}）：窗口可能被最小化"))?;
+
+    // 3. 比例换算（客户区物理 / 逻辑）
+    let sx = win.client_w as f64 / lw;
+    let sy = win.client_h as f64 / lh;
+    let cw = (rw * sx).round() as u32;
+    let ch = (rh * sy).round() as u32;
+    if cw < 10 || ch < 10 {
+        return Err(anyhow!("换算后的裁剪框异常（{cw}x{ch}）"));
+    }
+
+    // 4. WGC 截取显示器 + 裁剪保存
+    // （SDL 窗口无法直接 WGC——实测 GraphicsCaptureItem 创建失败；改为截取所在显示器，
+    //   裁剪框用屏幕物理坐标 − 显示器原点。注意：屏幕抓取的是实际呈现内容，
+    //   编辑器窗口被其他窗口遮挡时该区域会被遮挡物覆盖。）
+    let mon = monitor_info_for_window(win.hwnd)
+        .ok_or_else(|| anyhow!("定位显示器失败"))?;
+    // 视口屏幕物理坐标 = 客户区屏幕原点 + 逻辑矩形 × 比例
+    let screen_x = win.client_screen_x as f64 + rx * sx;
+    let screen_y = win.client_screen_y as f64 + ry * sy;
+    let mcx = (screen_x - mon.origin_x as f64).round().max(0.0) as u32;
+    let mcy = (screen_y - mon.origin_y as f64).round().max(0.0) as u32;
+
+    let dir = project_root.join(".bgd").join("log").join("screenshots");
+    std::fs::create_dir_all(&dir)?;
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let path = dir.join(format!("capture_{ts}.png"));
+    wgc_capture_monitor(mon.handle, &path, Some((mcx, mcy, cw, ch)))?;
+
+    Ok(json!({
+        "path": path.display().to_string(),
+        "width": cw,
+        "height": ch,
+        "mode": "game_viewport",
+    }))
+}
+
+/// 编辑器 SDL 内容窗口信息
+#[cfg(windows)]
+struct SdlWindowInfo {
+    hwnd: *mut std::ffi::c_void,
+    /// 客户区原点的屏幕坐标（物理像素）
+    client_screen_x: i32,
+    client_screen_y: i32,
+    /// 客户区物理尺寸
+    client_w: i32,
+    client_h: i32,
+}
+
+/// 显示器信息（WGC 截屏用）
+#[cfg(windows)]
+struct MonitorInfo {
+    handle: *mut std::ffi::c_void,
+    /// 显示器左上角屏幕坐标（多显示器时非 0,0）
+    origin_x: i32,
+    origin_y: i32,
+}
+
+/// 窗口所在显示器（MonitorFromWindow 就近原则）
+#[cfg(windows)]
+fn monitor_info_for_window(hwnd: *mut std::ffi::c_void) -> Option<MonitorInfo> {
+    use windows_sys::Win32::Foundation::HWND;
+    use windows_sys::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+    };
+    unsafe {
+        let hmon = MonitorFromWindow(hwnd as HWND, MONITOR_DEFAULTTONEAREST);
+        if hmon.is_null() {
+            return None;
+        }
+        let mut mi: MONITORINFO = std::mem::zeroed();
+        mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+        if GetMonitorInfoW(hmon, &mut mi) == 0 {
+            return None;
+        }
+        Some(MonitorInfo {
+            handle: hmon as *mut std::ffi::c_void,
+            origin_x: mi.rcMonitor.left,
+            origin_y: mi.rcMonitor.top,
+        })
+    }
+}
+
+/// 枚举该 pid 的顶层窗口，取类名 SDL_app 且面积最大者（编辑器内容窗口）。
+/// 注意 SDL 窗口 IsWindowVisible 可能报 False（引擎自绘边框技巧），不做可见性过滤。
+#[cfg(windows)]
+fn find_editor_sdl_window(pid: u32) -> Option<SdlWindowInfo> {
+    use windows_sys::Win32::Foundation::{HWND, LPARAM, POINT, RECT};
+    use windows_sys::Win32::Graphics::Gdi::ClientToScreen;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetClassNameW, GetClientRect, GetWindowRect, GetWindowThreadProcessId,
+    };
+
+    struct Ctx {
+        pid: u32,
+        best_hwnd: HWND,
+        best_area: i64,
+    }
+    unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> i32 {
+        let ctx = &mut *(lparam as *mut Ctx);
+        let mut wpid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, &mut wpid);
+        if wpid != ctx.pid {
+            return 1;
+        }
+        let mut cls = [0u16; 64];
+        let n = GetClassNameW(hwnd, cls.as_mut_ptr(), cls.len() as i32);
+        let name = String::from_utf16_lossy(&cls[..n as usize]);
+        if name != "SDL_app" {
+            return 1;
+        }
+        let mut rc = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        if GetWindowRect(hwnd, &mut rc) != 0 {
+            let area = (rc.right - rc.left) as i64 * (rc.bottom - rc.top) as i64;
+            if area > ctx.best_area {
+                ctx.best_area = area;
+                ctx.best_hwnd = hwnd;
+            }
+        }
+        1
+    }
+
+    let mut ctx = Ctx { pid, best_hwnd: std::ptr::null_mut(), best_area: 0 };
+    unsafe {
+        EnumWindows(Some(enum_proc), &mut ctx as *mut Ctx as LPARAM);
+    }
+    if ctx.best_hwnd.is_null() {
+        return None;
+    }
+
+    // 客户区原点屏幕坐标与客户区尺寸（比例换算用）
+    unsafe {
+        let hwnd = ctx.best_hwnd;
+        let mut client = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        GetClientRect(hwnd, &mut client);
+        let mut pt = POINT { x: 0, y: 0 };
+        ClientToScreen(hwnd, &mut pt);
+        Some(SdlWindowInfo {
+            hwnd,
+            client_screen_x: pt.x,
+            client_screen_y: pt.y,
+            client_w: client.right - client.left,
+            client_h: client.bottom - client.top,
+        })
+    }
+}
+
+/// WGC 捕获指定显示器一帧，可按帧内矩形（物理像素，相对显示器原点）裁剪后保存 png
+#[cfg(windows)]
+fn wgc_capture_monitor(
+    hmonitor: *mut std::ffi::c_void,
+    path: &Path,
+    crop: Option<(u32, u32, u32, u32)>,
+) -> Result<()> {
+    use windows_capture::capture::{Context, GraphicsCaptureApiHandler};
+    use windows_capture::frame::{Frame, ImageFormat};
+    use windows_capture::graphics_capture_api::InternalCaptureControl;
+    use windows_capture::monitor::Monitor;
+    use windows_capture::settings::{
+        ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings,
+        MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings,
+    };
+
+    // windows-capture 要求 new(ctx) 返回 Self——把 path/裁剪区/结果通道经 Flags 传入
+    struct CapFlags {
+        path: std::path::PathBuf,
+        crop: Option<(u32, u32, u32, u32)>,
+        done: std::sync::mpsc::Sender<Result<(), String>>,
+    }
+    struct CapHandler {
+        path: std::path::PathBuf,
+        crop: Option<(u32, u32, u32, u32)>,
+        done: std::sync::mpsc::Sender<Result<(), String>>,
+    }
+    impl GraphicsCaptureApiHandler for CapHandler {
+        type Flags = CapFlags;
+        type Error = anyhow::Error;
+
+        fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
+            let flags = ctx.flags;
+            Ok(Self { path: flags.path, crop: flags.crop, done: flags.done })
+        }
+
+        fn on_frame_arrived(
+            &mut self,
+            frame: &mut Frame,
+            capture_control: InternalCaptureControl,
+        ) -> Result<(), Self::Error> {
+            let r = (|| {
+                let mut buf = match self.crop {
+                    Some((x, y, w, h)) => frame
+                        .buffer_crop(x, y, x + w, y + h)
+                        .map_err(|e| format!("裁剪帧缓冲失败: {e}"))?,
+                    None => frame.buffer().map_err(|e| format!("读取帧缓冲失败: {e}"))?,
+                };
+                buf.save_as_image(&self.path, ImageFormat::Png)
+                    .map_err(|e| format!("保存截图失败: {e}"))?;
+                Ok(())
+            })();
+            let _ = self.done.send(r);
+            let _ = capture_control.stop();
+            Ok(())
+        }
+    }
+
+    let monitor = Monitor::from_raw_hmonitor(hmonitor);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let settings = Settings::new(
+        monitor,
+        CursorCaptureSettings::Default,
+        DrawBorderSettings::Default,
+        SecondaryWindowSettings::Default,
+        MinimumUpdateIntervalSettings::Default,
+        DirtyRegionSettings::Default,
+        ColorFormat::Rgba8,
+        CapFlags { path: path.to_path_buf(), crop, done: tx },
+    );
+    CapHandler::start(settings).map_err(|e| anyhow!("启动窗口捕获失败: {e}"))?;
+    rx.recv_timeout(Duration::from_secs(15))
+        .map_err(|_| anyhow!("窗口捕获超时（15s 未收到帧；窗口可能最小化）"))?
+        .map_err(|e| anyhow!(e))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

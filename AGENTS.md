@@ -94,7 +94,7 @@ src-tauri/src/
 - **三路哈希增量更新**：基准存 `.bgd/.framework_state.json`；冲突时本地保留 + 新版另存 `.framework-new`。文本文件统一 LF 后哈希（防 CRLF 误报）。
 - **监听去重**：同一文件 300ms 窗口聚合一次处理（防编辑器原子保存产生重复日志）。
 - **应用市场**：`apps.rs`（registry 拉取/安装/卸载）+ `AppPage.tsx`（UI）。安装即覆盖写入 `apps/<id>/`，升级不单独设命令——前端对比 registry 与本地 app.json 版本号，有新版显示「升级」按钮，点击走 `install_app` 覆盖。启动应用时自动透传 `--project-path <当前项目>`（子应用可选实现该参数）。
-- **MCP 聚合服务（0.5.3 场景一）**：`mcp.rs` stdio NDJSON 服务（`bgd_sce_tools mcp`，MCP 客户端按需拉起），恒定 8 工具：editor_start/editor_stop/get_logs 本地实现（`editor.rs`），start_debug（默认 restart_last_debug，失败回退全量）/stop_debug/publish_project/capture_game/get_status 在线透传编辑器内 bgd_mcp_bridge（HTTP，端口读 `<运行根>/logs/bgd_csharp/port` 文件，离线报「请先 editor_start」）。**轻量 locate 链**（map_settings api_version + tsconfig typeRoots → 运行根）与 sce_app_editor-patch 的 locate.rs 同源但独立维护（两仓库不互相引用）。编辑器 exe 名走应用设置 `editor_exe_name`（默认 星火编辑器.exe）。编辑器侧方案详见 sce_app_editor-patch 仓库 doc/requirements/0.5.3.md 与 doc/research/。
+- **MCP 聚合服务（0.5.3 场景一）**：`mcp.rs` stdio NDJSON 服务（`bgd_sce_tools mcp`，MCP 客户端按需拉起），恒定 8 工具：editor_start/editor_stop/get_logs 本地实现（`editor.rs`），start_debug（默认 restart_last_debug，失败回退全量）/stop_debug/publish_project/get_status 在线透传编辑器内 bgd_mcp_bridge（HTTP，端口读 `<运行根>/logs/bgd_csharp/port` 文件，离线报「请先 editor_start」）。**轻量 locate 链**（map_settings api_version + tsconfig typeRoots → 运行根）与 sce_app_editor-patch 的 locate.rs 同源但独立维护（两仓库不互相引用）。编辑器 exe 名走应用设置 `editor_exe_name`（默认 星火编辑器.exe）。**capture_game 实现（editor.rs）**：桥取 `lua.get_game_view_rect`（PIE 视口控件 get_screen_rect 逻辑矩形）→ 找编辑器 SDL 内容窗口（pid 内最大 SDL_app 顶层窗口）→ WGC 截显示器 + 按客户区物理/逻辑比例裁剪（windows-capture crate；SDL 窗口不可直接 WGC，必须截显示器）。编辑器侧方案详见 sce_app_editor-patch 仓库 doc/requirements/0.5.3.md 与 doc/research/。
 
 ## 测试与验证流程（本地闭环）
 

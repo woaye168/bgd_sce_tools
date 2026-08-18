@@ -125,24 +125,8 @@ fn tool_publish_project(args: &Value) -> Result<Value> {
 
 fn tool_capture_game(args: &Value) -> Result<Value> {
     let project = resolve_project(Some(args))?;
-    let (_t, port) = require_online(&project)?;
-    // 落盘到 <项目>/.bgd/log/screenshots/，AI 按返回路径自行查看
-    let dir = project.join(".bgd").join("log").join("screenshots");
-    std::fs::create_dir_all(&dir)?;
-    let ts = {
-        let secs = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        format!("capture_{secs}")
-    };
-    let path = dir.join(format!("{ts}.png"));
-    editor::bridge_invoke(
-        port,
-        "lua.capture_game",
-        json!({ "path": path.display().to_string() }),
-        15_000,
-    )
+    // 0.5.3 修订：纯游戏画面+游戏 UI（不含编辑器界面）——桥内定位 PIE 视口矩形 + 本机 WGC 整窗裁剪
+    editor::capture_editor_window(&project, &editor_exe_name())
 }
 
 // ---------------------------------------------------------------- MCP 协议
