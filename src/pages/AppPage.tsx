@@ -5,7 +5,7 @@ import Card from "../components/Card";
 
 /** 默认应用清单仓库（raw URL） */
 const DEFAULT_REGISTRY_URL =
-  "https://raw.githubusercontent.com/woaye168/bgd_sce_plugins/main/registry.json";
+  "https://raw.githubusercontent.com/woaye168/bgd_sce_appsdk/main/registry.json";
 
 /** 应用页：应用市场（远程清单）+ 已安装应用（打开/卸载） */
 export default function AppPage() {
@@ -204,6 +204,16 @@ export default function AppPage() {
                     <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
                       {app.description}
                     </p>
+                  )}
+                  {hasUpdate(app) && app.release_notes && (
+                    <details className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      <summary className="cursor-pointer text-amber-600 dark:text-amber-400">
+                        版本说明（v{app.version}）
+                      </summary>
+                      <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-slate-100 p-2 dark:bg-slate-800">
+                        {app.release_notes}
+                      </pre>
+                    </details>
                   )}
                 </div>
                 <div className="ml-4 flex shrink-0 items-center gap-2">

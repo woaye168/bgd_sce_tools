@@ -38,8 +38,7 @@ export interface FrameworkUpdateInfo {
 
 export type PageKey = "project" | "build" | "watch" | "apps" | "settings" | "about";
 
-/** 应用清单项（registry.json 中一个应用）
- * 私有仓库下 asset 直链不可用，用 repo + tag + asset_name 走 API 定位下载 */
+/** 应用清单项（registry 极简条目 + 应用仓库 app-release.json 补全的元数据） */
 export interface AppInfo {
   id: string;
   name: string;
@@ -48,12 +47,14 @@ export interface AppInfo {
   author?: string;
   /** GitHub 仓库（owner/repo） */
   repo: string;
-  /** Release tag（"latest" 表示最新 Release） */
-  tag: string;
+  /** Release tag（旧格式兼容字段，可空） */
+  tag?: string;
   /** Release asset 文件名 */
   asset_name: string;
   /** 下发默认：静默自启（用户本机记忆优先） */
   default_auto_start?: boolean;
+  /** 版本说明（升级按钮展示用） */
+  release_notes?: string;
 }
 
 /** 应用清单（registry.json 顶层） */

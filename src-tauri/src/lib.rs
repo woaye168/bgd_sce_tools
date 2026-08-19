@@ -412,7 +412,9 @@ fn update_framework(app: AppHandle, state: State<AppState>) -> Result<project::U
 fn fetch_app_registry(app: AppHandle, url: String) -> Result<apps::AppRegistry, String> {
     let proxy = load_proxy(&app);
     let token = load_token(&app);
-    let registry = apps::fetch_registry(&url, &proxy, &token).map_err(|e| e.to_string())?;
+    let mut registry = apps::fetch_registry(&url, &proxy, &token).map_err(|e| e.to_string())?;
+    // 用各应用仓库的 app-release.json 补全版本/描述/版本说明等元数据（极简 registry 链路）
+    apps::enrich_registry(&mut registry, &proxy, &token);
 
     // 静默自启下发默认（0.6.8）：registry 声明 default_auto_start 的应用，
     // 用户未勾选且未显式取消过时播种进本机配置；用户本机记忆（含取消）优先，不再覆盖
