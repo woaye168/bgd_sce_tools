@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
+import { listen } from "@tauri-apps/api/event";
 import { api } from "../lib/api";
 import Card from "../components/Card";
 
@@ -17,11 +18,21 @@ export default function AboutPage() {
   const checkUpdate = async () => {
     setBusy(true);
     setMessage("正在检查更新...");
+    let unlisten: (() => void) | undefined;
     try {
       const current = await getVersion();
       const info = await api.checkSelfUpdate(current);
       if (info.has_update) {
         setMessage(`发现新版本 v${info.latest}，正在下载安装包...`);
+        // 下载进度事件：显示 已下载/总大小（M，2 位小数）
+        unlisten = await listen<{ downloaded: number; total: number | null }>(
+          "self-update-progress",
+          (ev) => {
+            const done = (ev.payload.downloaded / 1048576).toFixed(2);
+            const total = ev.payload.total ? (ev.payload.total / 1048576).toFixed(2) : "?";
+            setMessage(`正在下载安装包... ${done}M / ${total}M`);
+          },
+        );
         await api.startSelfUpdate();
         setMessage("✔ 安装器已启动，请按提示完成安装");
       } else {
@@ -30,6 +41,7 @@ export default function AboutPage() {
     } catch (e) {
       setMessage(`✘ 检查更新失败: ${String(e)}`);
     } finally {
+      unlisten?.();
       setBusy(false);
     }
   };

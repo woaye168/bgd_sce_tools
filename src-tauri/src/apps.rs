@@ -276,29 +276,9 @@ pub async fn install_app_async(
         .and_then(|a| a["url"].as_str().map(str::to_string))
         .ok_or_else(|| anyhow!("Release 中未找到附件 {}（{}）", app.asset_name, app.repo))?;
 
-    // 2. 流式下载 asset（octet-stream）到 exe 路径（覆盖写），回调进度
+    // 2. 流式下载 asset 到 exe 路径（覆盖写），回调进度（net 统一实现）
     let exe_path = dir.join(format!("{}.exe", app.id));
-    let resp = client
-        .get(&asset_url)
-        .header(reqwest::header::ACCEPT, "application/octet-stream")
-        .send()
-        .await
-        .context("请求应用附件下载失败")?;
-    if !resp.status().is_success() {
-        return Err(anyhow!("下载应用附件失败: HTTP {}", resp.status()));
-    }
-    let total = resp.content_length();
-    let mut bytes = Vec::with_capacity(total.unwrap_or(0) as usize);
-    let mut downloaded = 0u64;
-    on_progress(0, total);
-    use futures_util::StreamExt;
-    let mut s = resp.bytes_stream();
-    while let Some(chunk) = s.next().await {
-        let chunk = chunk.context("读取下载流失败")?;
-        downloaded += chunk.len() as u64;
-        on_progress(downloaded, total);
-        bytes.extend_from_slice(&chunk);
-    }
+    let bytes = crate::net::download_bytes_async(&asset_url, proxy, token, on_progress).await?;
     fs::write(&exe_path, &bytes).with_context(|| format!("写入应用文件失败: {}", exe_path.display()))?;
 
     // 3. 写 app.json（记录已安装版本/元数据，供升级判断）

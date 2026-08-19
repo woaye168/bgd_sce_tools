@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { api } from "../lib/api";
 import type { AppSettings, BgdConfig, FrameworkUpdateInfo, UpdateReport } from "../lib/types";
 import Card from "../components/Card";
@@ -69,7 +70,18 @@ export default function SettingsPage() {
   const doUpdate = async () => {
     setBusy(true);
     setReport(null);
+    setMessage("正在下载框架...");
+    let unlisten: (() => void) | undefined;
     try {
+      // 下载进度事件：显示 已下载/总大小（M，2 位小数）
+      unlisten = await listen<{ downloaded: number; total: number | null }>(
+        "framework-download-progress",
+        (ev) => {
+          const done = (ev.payload.downloaded / 1048576).toFixed(2);
+          const total = ev.payload.total ? (ev.payload.total / 1048576).toFixed(2) : "?";
+          setMessage(`正在下载框架... ${done}M / ${total}M`);
+        },
+      );
       const rep = await api.updateFramework();
       setReport(rep);
       setMessage(
@@ -79,6 +91,7 @@ export default function SettingsPage() {
     } catch (e) {
       setMessage(`✘ 更新失败: ${String(e)}`);
     } finally {
+      unlisten?.();
       setBusy(false);
     }
   };

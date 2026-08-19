@@ -403,14 +403,48 @@ fn check_framework_update(app: AppHandle, state: State<AppState>) -> Result<serd
 }
 
 #[tauri::command]
-fn update_framework(app: AppHandle, state: State<AppState>) -> Result<project::UpdateReport, String> {
+async fn update_framework(app: AppHandle, state: State<'_, AppState>) -> Result<project::UpdateReport, String> {
     let bgd_root = state.bgd_root()?;
     let cfg = load_cfg(&bgd_root)?;
-    let log = |line: &str| emit_log(&app, "build", line);
     let proxy = load_proxy(&app);
     let token = load_token(&app);
     let project_root = bgd_root.parent().ok_or("无法确定项目根目录")?.to_path_buf();
-    project::update_framework(&project_root, &cfg.framework_repo, &proxy, &token, &log).map_err(|e| e.to_string())
+    let repo = cfg.framework_repo.clone();
+
+    // 进度回调（线程安全 channel）：writer 移入更新线程，reader 在 async 侧定时转发前端事件
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(u64, Option<u64>)>();
+    let on_progress = move |downloaded: u64, total: Option<u64>| {
+        let _ = tx.send((downloaded, total));
+    };
+
+    // 下载+三路对比是 CPU/IO 混合的同步代码（log 闭包非 Send），放阻塞线程执行
+    let app1 = app.clone();
+    let handle = tokio::task::spawn_blocking(move || -> Result<project::UpdateReport, String> {
+        let log = |line: &str| emit_log(&app1, "build", line);
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| format!("创建运行时失败: {e}"))?;
+        rt.block_on(project::update_framework_async(
+            &project_root, &repo, &proxy, &token, &log, on_progress,
+        ))
+        .map_err(|e| e.to_string())
+    });
+
+    // 转发进度事件到前端（async 侧，不阻塞）
+    let app2 = app.clone();
+    let forward = tokio::spawn(async move {
+        while let Some((downloaded, total)) = rx.recv().await {
+            let _ = app2.emit(
+                "framework-download-progress",
+                serde_json::json!({ "downloaded": downloaded, "total": total }),
+            );
+        }
+    });
+
+    let report = handle.await.map_err(|e| format!("更新任务失败: {e}"))?;
+    forward.abort();
+    report
 }
 
 // ---------------------------------------------------------------- 应用（WeGame 模式）
@@ -470,14 +504,7 @@ async fn install_app(app: AppHandle, state: State<'_, AppState>, app_info: apps:
         apps::stop_app(&app_info.id).map_err(|e| format!("停止运行中的 {app_info} 失败: {e}", app_info = app_info.id))?;
     }
     // 下载进度回调：向前端发事件（AppPage 显示 已下载/总大小）
-    let app_handle = app.clone();
-    let app_id = app_info.id.clone();
-    let on_progress = move |downloaded: u64, total: Option<u64>| {
-        let _ = app_handle.emit(
-            "app-download-progress",
-            serde_json::json!({ "id": app_id, "downloaded": downloaded, "total": total }),
-        );
-    };
+    let on_progress = crate::net::progress_emitter(&app, "app-download-progress", Some(app_info.id.clone()));
     apps::install_app_async(&app_info, &proxy, &token, on_progress)
         .await
         .map_err(|e| e.to_string())?;
@@ -569,10 +596,13 @@ fn check_self_update(app: AppHandle, current: String) -> Result<updater::SelfUpd
 
 /// 下载最新安装包并启动安装器（安装器会自动关闭并替换当前程序）
 #[tauri::command]
-fn start_self_update(app: AppHandle) -> Result<(), String> {
+async fn start_self_update(app: AppHandle) -> Result<(), String> {
     let proxy = load_proxy(&app);
     let token = load_token(&app);
-    updater::start_self_update(&proxy, &token).map_err(|e| e.to_string())
+    let on_progress = crate::net::progress_emitter(&app, "self-update-progress", None);
+    updater::start_self_update_async(&proxy, &token, on_progress)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 // ---------------------------------------------------------------- 入口

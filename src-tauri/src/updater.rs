@@ -60,9 +60,24 @@ pub fn check_self_update(current: &str, proxy: &str, token: &str) -> Result<Self
 }
 
 /// 下载最新 Release 的 NSIS 安装包并启动（安装器会自动关闭并替换当前进程）
-pub fn start_self_update(proxy: &str, token: &str) -> Result<()> {
-    let client = crate::net::http_client(proxy, token)?;
-    let release = latest_release(proxy, token)?;
+/// 启动自我更新（async：Release 查询与安装包下载让出线程；
+/// `on_progress(downloaded, total)` 回调下载进度）
+pub async fn start_self_update_async(
+    proxy: &str,
+    token: &str,
+    on_progress: impl Fn(u64, Option<u64>) + Send,
+) -> Result<()> {
+    let client = crate::net::async_http_client(proxy, token)?;
+    let release_url = format!("https://api.github.com/repos/{}/releases/latest", env!("CARGO_PKG_NAME"));
+    let resp = client
+        .get(&release_url)
+        .send()
+        .await
+        .with_context(|| format!("检查更新失败: {release_url}"))?;
+    if !resp.status().is_success() {
+        return Err(anyhow!("检查更新失败: HTTP {}", resp.status()));
+    }
+    let release: serde_json::Value = resp.json().await.context("解析 Release 响应失败")?;
 
     // 找 NSIS 安装包 asset（tauri 打包命名：<product>_<version>_x64-setup.exe）
     let assets = release["assets"].as_array().cloned().unwrap_or_default();
@@ -77,15 +92,7 @@ pub fn start_self_update(proxy: &str, token: &str) -> Result<()> {
         .next()
         .ok_or_else(|| anyhow!("最新 Release 中找不到 NSIS 安装包（*-setup.exe）"))?;
 
-    let resp = client
-        .get(&asset_url)
-        .header(reqwest::header::ACCEPT, "application/octet-stream")
-        .send()
-        .context("下载安装包失败")?;
-    if !resp.status().is_success() {
-        return Err(anyhow!("下载安装包失败: HTTP {}", resp.status()));
-    }
-    let bytes = resp.bytes().context("读取安装包内容失败")?;
+    let bytes = crate::net::download_bytes_async(&asset_url, proxy, token, on_progress).await?;
 
     let installer = std::env::temp_dir().join("bgd_sce_tools-update-setup.exe");
     std::fs::write(&installer, &bytes)
@@ -96,4 +103,12 @@ pub fn start_self_update(proxy: &str, token: &str) -> Result<()> {
         .spawn()
         .with_context(|| format!("启动安装器失败: {}", installer.display()))?;
     Ok(())
+}
+
+pub fn start_self_update(proxy: &str, token: &str) -> Result<()> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| anyhow!("创建运行时失败: {e}"))?;
+    rt.block_on(start_self_update_async(proxy, token, |_, _| {}))
 }

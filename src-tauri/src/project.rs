@@ -110,6 +110,21 @@ fn download_and_extract(url: &str, proxy: &str, token: &str) -> Result<PathBuf> 
         return Err(anyhow!("下载失败: HTTP {} ({url})", resp.status()));
     }
     let bytes = resp.bytes()?;
+    extract_zip(bytes.to_vec())
+}
+
+/// 流式下载并解压（async；进度回调由 net 统一实现）
+async fn download_and_extract_async(
+    url: &str,
+    proxy: &str,
+    token: &str,
+    on_progress: impl Fn(u64, Option<u64>) + Send,
+) -> Result<PathBuf> {
+    let bytes = crate::net::download_bytes_async(url, proxy, token, on_progress).await?;
+    extract_zip(bytes)
+}
+
+fn extract_zip(bytes: Vec<u8>) -> Result<PathBuf> {
 
     let tmp = std::env::temp_dir().join(format!("bgd-framework-{}-{}", std::process::id(), now_ts()));
     if tmp.exists() {
@@ -135,6 +150,17 @@ fn download_and_extract(url: &str, proxy: &str, token: &str) -> Result<PathBuf> 
 fn download_framework_template(repo: &str, proxy: &str, token: &str) -> Result<PathBuf> {
     let url = format!("https://codeload.github.com/{}/zip/refs/heads/main", effective_repo(repo));
     download_and_extract(&url, proxy, token)
+}
+
+/// 下载框架 main 分支快照（async：流式 + 进度回调）
+async fn download_framework_template_async(
+    repo: &str,
+    proxy: &str,
+    token: &str,
+    on_progress: impl Fn(u64, Option<u64>) + Send,
+) -> Result<PathBuf> {
+    let url = format!("https://codeload.github.com/{}/zip/refs/heads/main", effective_repo(repo));
+    download_and_extract_async(&url, proxy, token, on_progress).await
 }
 
 /// 下载框架指定 tag 快照（用于重建旧版基准）
@@ -334,8 +360,24 @@ pub struct UpdateReport {
     pub version: String,
 }
 
-/// 更新框架：只处理 .bgd/libs（三路哈希对比），随后重新合并生成项目根配置
+/// 更新框架（CLI 同步入口）：只处理 .bgd/libs（三路哈希对比），随后重新合并生成项目根配置
 pub fn update_framework(project_root: &Path, repo: &str, proxy: &str, token: &str, log: &crate::builder::LogFn) -> Result<UpdateReport> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| anyhow!("创建运行时失败: {e}"))?;
+    rt.block_on(update_framework_async(project_root, repo, proxy, token, log, |_, _| {}))
+}
+
+/// 框架增量更新（async：下载让出线程 + 进度回调；其余三路对比逻辑复用同步版）
+pub async fn update_framework_async(
+    project_root: &Path,
+    repo: &str,
+    proxy: &str,
+    token: &str,
+    log: &crate::builder::LogFn<'_>,
+    on_progress: impl Fn(u64, Option<u64>) + Send,
+) -> Result<UpdateReport> {
     let dest_bgd = project_root.join(".bgd");
     if !dest_bgd.is_dir() {
         return Err(anyhow!("项目尚未初始化（缺少 .bgd 目录）"));
@@ -374,9 +416,9 @@ pub fn update_framework(project_root: &Path, repo: &str, proxy: &str, token: &st
         }
     }
 
-    // 2. 新版（remote）
+    // 2. 新版（remote）：async 流式下载 + 进度回调
     log("开始下载最新框架...");
-    let template = download_framework_template(repo, proxy, token)?;
+    let template = download_framework_template_async(repo, proxy, token, on_progress).await?;
     let remote_libs = template.join(".bgd").join("libs");
     let remote = collect_libs_hashes(&remote_libs, ".bgd/libs")?;
 
