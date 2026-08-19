@@ -516,8 +516,9 @@ fn start_app(state: State<AppState>, app_id: String) -> Result<(), String> {
     if !app_exe.is_file() {
         return Err(format!("应用 {app_id} 未安装"));
     }
-    // 单开守卫；editor-patch 自身实现了单实例唤起（重复启动只唤出窗口），放行由它去重
-    if app_id != "editor-patch" && apps::is_app_running(&app_exe) {
+    // 单开守卫：已在运行不重复拉起（所有接入 bgd_appsdk 的应用都自带单实例唤起，
+    // 放行由应用自身去重并唤出窗口——不再特例 editor-patch）
+    if apps::is_app_running(&app_exe) {
         return Err(format!("应用 {app_id} 已在运行（单开限制）"));
     }
     let mut cmd = std::process::Command::new(&app_exe);
