@@ -129,6 +129,17 @@ fn select_project(app: AppHandle, state: State<AppState>, path: String) -> Resul
     let app_data = app.path().app_config_dir().map_err(|e| e.to_string())?;
     let recent = project::add_recent(&app_data, &path).map_err(|e| e.to_string())?;
 
+    // 项目切换广播（0.6.10）：notify 所有静默自启应用（异步、失败静默，应用自治处理）
+    {
+        let ids = project::load_settings(&app_data).auto_start_apps;
+        if !ids.is_empty() {
+            let pair = format!("project_path={}", root.display());
+            for id in ids {
+                apps::notify_app(&id, std::slice::from_ref(&pair));
+            }
+        }
+    }
+
     // 若监听开关为开且新项目已初始化，自动对新项目开启监听
     let watch_enabled = app_data_dir(&app)
         .map(|d| project::load_settings(&d).watch_enabled)
@@ -595,6 +606,12 @@ pub fn run() {
             check_self_update,
             start_self_update,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running BGD_SCE_TOOLS");
+        .build(tauri::generate_context!())
+        .expect("error while building BGD_SCE_TOOLS")
+        .run(|_app, event| {
+            // 宿主退出：联动关闭所有正在运行的已安装应用（先 --quit 优雅退出，兜底强杀）
+            if let tauri::RunEvent::Exit = event {
+                apps::stop_all_running_apps();
+            }
+        });
 }

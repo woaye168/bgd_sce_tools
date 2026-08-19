@@ -338,3 +338,53 @@ pub fn autostart_apps(ids: &[String], project: Option<&std::path::Path>) {
         let _ = cmd.spawn();
     }
 }
+
+// ---------------------------------------------------------------- 通知与联动（0.6.10）
+
+/// 向应用发送 notify 通知（解耦约定：`<exe> notify key=value ...`；
+/// 应用自行决定如何处理，宿主零知识。异步拉起、失败静默）
+pub fn notify_app(id: &str, pairs: &[String]) {
+    let Ok(exe) = app_exe_path(id) else { return };
+    if !exe.is_file() {
+        return;
+    }
+    let mut cmd = std::process::Command::new(&exe);
+    cmd.arg("notify").args(pairs);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let _ = cmd.spawn();
+}
+
+/// 宿主退出时联动关闭所有正在运行的已安装应用：
+/// 先对全部运行实例广播 --quit 优雅退出，等待后兜底 taskkill
+pub fn stop_all_running_apps() {
+    let Ok(installed) = list_installed() else { return };
+    let running = running_exe_paths();
+    let mut alive: Vec<String> = Vec::new();
+    for app in &installed {
+        let Ok(exe) = app_exe_path(&app.id) else { continue };
+        if exe.is_file() && is_running_in(&exe, &running) {
+            // 广播优雅退出信号
+            let mut cmd = std::process::Command::new(&exe);
+            cmd.arg("--quit");
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                cmd.creation_flags(CREATE_NO_WINDOW);
+            }
+            let _ = cmd.spawn();
+            alive.push(app.id.clone());
+        }
+    }
+    if alive.is_empty() {
+        return;
+    }
+    // 等优雅退出（最多 2s），存活者逐个强杀
+    std::thread::sleep(std::time::Duration::from_secs(2));
+    for id in &alive {
+        let _ = stop_app(id);
+    }
+}
