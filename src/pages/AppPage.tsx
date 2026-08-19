@@ -23,13 +23,18 @@ export default function AppPage() {
       .catch(() => {});
   }, []);
 
-  /** 切换应用「静默自启」（随宿主启动静默拉起；单开：已在运行不重复拉起） */
+  /** 切换应用「静默自启」（本机记忆优先；取消后 registry 下发默认不再播种） */
   const toggleAutoStart = async (id: string, on: boolean) => {
     const next = on ? [...autoStart, id] : autoStart.filter((x) => x !== id);
     setAutoStart(next);
     try {
       const s = await api.getAppSettings();
-      await api.saveAppSettings({ ...s, auto_start_apps: next });
+      const disabled = (s.auto_start_disabled ?? []).filter((x) => x !== id);
+      await api.saveAppSettings({
+        ...s,
+        auto_start_apps: next,
+        auto_start_disabled: on ? disabled : [...disabled, id],
+      });
       setMessage(on ? `✔ 已设置静默自启` : `✔ 已取消静默自启`);
     } catch (e) {
       setMessage(`✘ 保存静默自启配置失败: ${String(e)}`);

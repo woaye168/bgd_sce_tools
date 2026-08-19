@@ -22,6 +22,9 @@ pub struct AppInfo {
     pub tag: String,
     /// Release asset 文件名
     pub asset_name: String,
+    /// 下发默认：静默自启（0.6.8 起；用户本机勾选/取消的记忆优先，见 settings.auto_start_disabled）
+    #[serde(default)]
+    pub default_auto_start: bool,
 }
 
 /// 应用清单（registry.json 顶层）
@@ -223,6 +226,91 @@ fn is_running_in(exe: &std::path::Path, running: &[String]) -> bool {
 /// 应用是否已在运行（按 exe 全路径匹配进程，兼容大小写与斜杠）
 pub fn is_app_running(exe: &std::path::Path) -> bool {
     is_running_in(exe, &running_exe_paths())
+}
+
+/// 运行中应用的 pid 列表（按 exe 全路径匹配）
+fn app_pids(exe: &std::path::Path) -> Vec<u32> {
+    let want = exe.display().to_string().replace('/', "\\").to_lowercase();
+    let mut cmd = std::process::Command::new("powershell");
+    cmd.args([
+        "-NoProfile",
+        "-Command",
+        "Get-CimInstance Win32_Process | Select-Object ProcessId,ExecutablePath | ConvertTo-Json -Compress",
+    ]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let Ok(out) = cmd.output() else {
+        return Vec::new();
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    let Ok(doc) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return Vec::new();
+    };
+    let list = match &doc {
+        serde_json::Value::Array(a) => a.clone(),
+        serde_json::Value::Object(_) => vec![doc],
+        _ => return Vec::new(),
+    };
+    list.iter()
+        .filter(|p| {
+            p["ExecutablePath"]
+                .as_str()
+                .map(|s| s.to_lowercase() == want)
+                .unwrap_or(false)
+        })
+        .filter_map(|p| p["ProcessId"].as_u64().map(|v| v as u32))
+        .collect()
+}
+
+/// 停止运行中的应用实例：先 `--quit` 优雅退出（应用支持时，如 editor-patch 的单实例机制），
+/// 等待退出；超时兜底 taskkill /F。全部实例消失（或本来就没在跑）返回 Ok。
+pub fn stop_app(id: &str) -> Result<()> {
+    let exe = app_exe_path(id)?;
+    if !exe.is_file() {
+        return Ok(()); // 未安装，无需停止
+    }
+    // 优雅退出信号（不识别的应用会直接报错退出或忽略，无副作用）
+    if is_app_running(&exe) {
+        let mut cmd = std::process::Command::new(&exe);
+        cmd.arg("--quit");
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+        let _ = cmd.spawn();
+        // 等待优雅退出（最多 3s）
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while std::time::Instant::now() < deadline {
+            if !is_app_running(&exe) {
+                return Ok(());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+    }
+    // 兜底强杀
+    for pid in app_pids(&exe) {
+        let mut cmd = std::process::Command::new("taskkill");
+        cmd.args(["/PID", &pid.to_string(), "/F"]);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+        let _ = cmd.output();
+    }
+    // 确认消失（最多 3s）
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while std::time::Instant::now() < deadline {
+        if app_pids(&exe).is_empty() {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    Err(anyhow!("应用 {id} 进程未能停止"))
 }
 
 /// 静默自启配置的应用（单开：已在运行跳过；有当前项目则透传 --project-path）。

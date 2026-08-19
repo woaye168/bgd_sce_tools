@@ -52,6 +52,8 @@ export interface AppInfo {
   tag: string;
   /** Release asset 文件名 */
   asset_name: string;
+  /** 下发默认：静默自启（用户本机记忆优先） */
+  default_auto_start?: boolean;
 }
 
 /** 应用清单（registry.json 顶层） */
@@ -80,6 +82,8 @@ export interface AppSettings {
   github_token: string;
   /** 随主程序静默启动的应用 id 列表（单开：已在运行不重复拉起） */
   auto_start_apps: string[];
+  /** 用户手动取消静默自启的应用 id（registry 下发的默认值不再对这些 id 播种） */
+  auto_start_disabled: string[];
 }
 
 /** 自我更新检查结果 */

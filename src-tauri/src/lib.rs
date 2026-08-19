@@ -401,27 +401,63 @@ fn update_framework(app: AppHandle, state: State<AppState>) -> Result<project::U
 fn fetch_app_registry(app: AppHandle, url: String) -> Result<apps::AppRegistry, String> {
     let proxy = load_proxy(&app);
     let token = load_token(&app);
-    apps::fetch_registry(&url, &proxy, &token).map_err(|e| e.to_string())
+    let registry = apps::fetch_registry(&url, &proxy, &token).map_err(|e| e.to_string())?;
+
+    // 静默自启下发默认（0.6.8）：registry 声明 default_auto_start 的应用，
+    // 用户未勾选且未显式取消过时播种进本机配置；用户本机记忆（含取消）优先，不再覆盖
+    if let Ok(dir) = app.path().app_config_dir() {
+        let mut settings = project::load_settings(&dir);
+        let mut changed = false;
+        for a in &registry.apps {
+            if a.default_auto_start
+                && !settings.auto_start_apps.iter().any(|id| id == &a.id)
+                && !settings.auto_start_disabled.iter().any(|id| id == &a.id)
+            {
+                settings.auto_start_apps.push(a.id.clone());
+                changed = true;
+            }
+        }
+        if changed {
+            project::save_settings(&dir, &settings).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(registry)
 }
 
 /// 安装应用（下载 exe 到 <宿主>/apps/{id}/）
 #[tauri::command]
-fn install_app(app: AppHandle, app_info: apps::AppInfo) -> Result<(), String> {
+fn install_app(app: AppHandle, state: State<AppState>, app_info: apps::AppInfo) -> Result<(), String> {
     let proxy = load_proxy(&app);
     let token = load_token(&app);
-    // 首次安装标记（升级覆盖不重置用户配置）
-    let first_install = !apps::app_dir_exists(&app_info.id);
+
+    // 升级前若实例在运行（静默自启/手动打开的），先停止再覆盖——否则 exe 被锁定写入失败。
+    // 先 --quit 优雅退出（应用支持时），兜底 taskkill；装完若之前在跑则按自启配置重启。
+    let was_running = apps::is_app_running(&apps::app_exe_path(&app_info.id).map_err(|e| e.to_string())?);
+    if was_running {
+        apps::stop_app(&app_info.id).map_err(|e| format!("停止运行中的 {app_info} 失败: {e}", app_info = app_info.id))?;
+    }
     apps::install_app(&app_info, &proxy, &token).map_err(|e| e.to_string())?;
 
-    // 编辑器补丁默认静默自启（0.6.7）：仅首次安装时播种，用户手动取消后不再重置
-    if first_install && app_info.id == "editor-patch" {
-        if let Ok(dir) = app.path().app_config_dir() {
-            let mut settings = project::load_settings(&dir);
-            if !settings.auto_start_apps.iter().any(|id| id == "editor-patch") {
-                settings.auto_start_apps.push("editor-patch".to_string());
-                project::save_settings(&dir, &settings).map_err(|e| e.to_string())?;
-            }
+    if was_running {
+        let auto = app
+            .path()
+            .app_config_dir()
+            .map(|dir| project::load_settings(&dir).auto_start_apps.iter().any(|id| id == &app_info.id))
+            .unwrap_or(false);
+        let exe = apps::app_exe_path(&app_info.id).map_err(|e| e.to_string())?;
+        let mut cmd = std::process::Command::new(&exe);
+        if let Some(root) = state.project.lock().map_err(|e| e.to_string())?.as_ref() {
+            cmd.arg("--project-path").arg(root);
         }
+        if auto {
+            cmd.arg("--background");
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
+        let _ = cmd.spawn();
     }
     Ok(())
 }

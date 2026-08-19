@@ -30,6 +30,9 @@ pub struct AppSettings {
     /// 随主程序静默启动的应用 id 列表（0.6.6 起；单开：已在运行不重复拉起）
     #[serde(default)]
     pub auto_start_apps: Vec<String>,
+    /// 用户手动取消静默自启的应用 id（0.6.8 起；registry 下发的 default_auto_start 不再对这些 id 播种）
+    #[serde(default)]
+    pub auto_start_disabled: Vec<String>,
 }
 
 /// 应用配置目录（GUI/CLI/MCP 共用约定：%APPDATA%/com.bgd.sce-tools）
