@@ -88,7 +88,7 @@ src-tauri/src/
 - **配置 overlay**：`libs/bgd_default.json`（框架下发）逐 key 被 `.bgd/bgd.json`（项目覆盖）覆盖；保存只写差异。
 - **三路哈希增量更新**：基准存 `.bgd/.framework_state.json`；冲突时本地保留 + 新版另存 `.framework-new`。文本文件统一 LF 后哈希（防 CRLF 误报）。
 - **监听去重**：同一文件 300ms 窗口聚合一次处理（防编辑器原子保存产生重复日志）。
-- **应用市场**：安装即覆盖写入 `apps/<id>/`；升级按钮由前端对比 registry 与本地 app.json 版本号驱动，走 `install_app` 覆盖（升级前自动停止运行中实例：先 `--quit` 优雅退出、兜底 taskkill；装完按自启配置重启）。启动应用透传 `--project-path <当前项目>`。**静默自启**：勾选写入设置 `auto_start_apps`；默认值由 registry 条目 `default_auto_start` 下发（用户本机勾选/取消优先，取消记入 `auto_start_disabled` 不再播种）；宿主启动时后台线程异步拉起（不阻塞首屏；进程列表一次查询内存匹配；子进程一律 CREATE_NO_WINDOW；透传 `--background` 由应用决定是否无窗口驻留）。**宿主联动**：退出时对所有运行中的已安装应用广播 `--quit`（兜底 taskkill）；切换项目时对静默自启应用执行 `<exe> notify project_path=<路径>` 解耦通知（应用自治处理）。
+- **应用市场**：安装即覆盖写入 `apps/<id>/`；升级按钮由前端对比 registry 与本地 app.json 版本号驱动，走 `install_app` 覆盖（升级前自动停止运行中实例：先 `--quit` 优雅退出、兜底 taskkill；装完按自启配置重启）。启动应用透传 `--project-path <当前项目>`。**清单读取链（R5）**：registry（[bgd_sce_appsdk](https://github.com/woaye168/bgd_sce_appsdk)，极简条目 id/name/repo）→ 各应用仓库 `releases/latest` 的 `app-release.json` asset 补全版本/描述/作者/asset名/版本说明（CI 合成；升级按钮展示版本说明；发版不再改 registry）。**静默自启**：勾选写入设置 `auto_start_apps`；默认值由 `default_auto_start` 下发（app-release.json 提供；用户本机勾选/取消优先，取消记入 `auto_start_disabled` 不再播种）；宿主启动时后台线程异步拉起（不阻塞首屏；进程列表一次查询内存匹配；子进程一律 CREATE_NO_WINDOW；透传 `--background` 由应用决定是否无窗口驻留）。**宿主联动**：退出时对所有运行中的已安装应用广播 `--quit`（兜底 taskkill）；切换项目时对静默自启应用执行 `<exe> notify project_path=<路径>` 解耦通知（应用自治处理）。
 
 ## 测试与验证流程（本地闭环）
 
