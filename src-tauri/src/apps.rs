@@ -265,14 +265,13 @@ fn app_pids(exe: &std::path::Path) -> Vec<u32> {
         .collect()
 }
 
-/// 停止运行中的应用实例：先 `--quit` 优雅退出（应用支持时，如 editor-patch 的单实例机制），
-/// 等待退出；超时兜底 taskkill /F。全部实例消失（或本来就没在跑）返回 Ok。
+/// 停止运行中的应用实例：先 `--quit` 优雅退出（应用自 0.5.7/0.6.8 起支持），
+/// 超时兜底 taskkill /F。全部实例消失（或本来就没在跑）返回 Ok。
 pub fn stop_app(id: &str) -> Result<()> {
     let exe = app_exe_path(id)?;
     if !exe.is_file() {
         return Ok(()); // 未安装，无需停止
     }
-    // 优雅退出信号（不识别的应用会直接报错退出或忽略，无副作用）
     if is_app_running(&exe) {
         let mut cmd = std::process::Command::new(&exe);
         cmd.arg("--quit");

@@ -6,7 +6,7 @@
 
 星火编辑器（SCE）Lua 框架构建工具。Tauri 2（Rust 后端 + WebView2）+ Vite/React/TS/Tailwind 前端的 Windows 桌面应用，同时具备 **CLI 子命令**能力。配套框架模板仓库：[bgd_sce_framework](https://github.com/woaye168/bgd_sce_framework)。
 
-核心职责：项目初始化、全量/增量构建（静态 require 改写）、监听更新、框架三路哈希增量更新、自我更新。
+核心职责：项目初始化、全量/增量构建（静态 require 改写）、监听更新、框架三路哈希增量更新、自我更新、应用市场（宿主，不依赖任何应用的功能——编辑器控制/MCP 自持于 sce_app_editor-patch）。
 
 ## 环境要求
 
@@ -64,7 +64,7 @@ bgd_sce_tools setting set <键> <值>                  # 写入应用设置
 ```
 src/                        # 前端（React）
   lib/{api.ts, types.ts}    # Tauri 命令封装与类型（与后端命令一一对应）
-  pages/                    # 项目/构建/监听/设置/关于
+  pages/                    # 项目/构建/监听/设置/关于/应用市场
   components/               # Sidebar/LogPanel/Card
 src-tauri/src/
   main.rs                   # 二进制入口：CLI 分发 + GUI 启动
@@ -73,6 +73,7 @@ src-tauri/src/
   builder.rs                # 构建核心：白名单构建/增量/清理/API聚合/init渲染/入口合并/配置合并/监听去重
   project.rs                # 初始化(含锁)/框架下载/三路哈希增量更新/最近项目/应用设置
   config.rs                 # bgd.json overlay 读写（bgd_default.json 基底 + bgd.json 覆盖）
+  apps.rs                   # 应用市场：registry 拉取/安装/卸载/静默自启/停止应用
 ```
 
 ## 关键机制（改代码前必读）
@@ -87,7 +88,7 @@ src-tauri/src/
 - **配置 overlay**：`libs/bgd_default.json`（框架下发）逐 key 被 `.bgd/bgd.json`（项目覆盖）覆盖；保存只写差异。
 - **三路哈希增量更新**：基准存 `.bgd/.framework_state.json`；冲突时本地保留 + 新版另存 `.framework-new`。文本文件统一 LF 后哈希（防 CRLF 误报）。
 - **监听去重**：同一文件 300ms 窗口聚合一次处理（防编辑器原子保存产生重复日志）。
-- **应用市场**：`apps.rs`（registry 拉取/安装/卸载/静默自启/停止应用）+ `AppPage.tsx`（UI）。安装即覆盖写入 `apps/<id>/`，升级不单独设命令——前端对比 registry 与本地 app.json 版本号，有新版显示「升级」按钮，点击走 `install_app` 覆盖。**升级前自动停止运行中实例**（先 `--quit` 优雅退出、兜底 taskkill；装完按自启配置重启，0.6.8）。启动应用时自动透传 `--project-path <当前项目>`（子应用可选实现该参数）。**静默自启**：应用页勾选写入设置 `auto_start_apps`；**默认值由 registry 下发**（条目 `default_auto_start`，0.6.8；用户勾选/取消的本机记忆优先——取消记入 `auto_start_disabled` 不再播种）；宿主 GUI 启动时后台线程异步拉起（不阻塞首屏；进程列表只查一次内存匹配；所有子进程 CREATE_NO_WINDOW 无黑终端；透传 `--background` 由应用决定是否无窗口驻留）；editor-patch 自身实现单实例唤起/退出（`--quit` 信号），「打开」放行由它去重。主程序不依赖任何应用的功能（解耦：编辑器控制能力/MCP 聚合服务自持于 sce_app_editor-patch）。
+- **应用市场**：安装即覆盖写入 `apps/<id>/`；升级按钮由前端对比 registry 与本地 app.json 版本号驱动，走 `install_app` 覆盖（升级前自动停止运行中实例：先 `--quit` 优雅退出、兜底 taskkill；装完按自启配置重启）。启动应用透传 `--project-path <当前项目>`。**静默自启**：勾选写入设置 `auto_start_apps`；默认值由 registry 条目 `default_auto_start` 下发（用户本机勾选/取消优先，取消记入 `auto_start_disabled` 不再播种）；宿主启动时后台线程异步拉起（不阻塞首屏；进程列表一次查询内存匹配；子进程一律 CREATE_NO_WINDOW；透传 `--background` 由应用决定是否无窗口驻留）。
 
 ## 测试与验证流程（本地闭环）
 
