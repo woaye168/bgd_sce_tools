@@ -476,8 +476,10 @@ pub fn update_framework(project_root: &Path, repo: &str, proxy: &str, token: &st
 
 // ---------------------------------------------------------------- 引擎日志清理
 
-/// 从当前项目推导编辑器根目录（与 sce_app_editor-patch 同款定位链：
-/// `<项目>/script/tsconfig.json` 的 typeRoots 中找含 `Res/_m` 的条目，取其前缀）
+/// 从当前项目推导**引擎运行根**（logs/logs_subprocess/logs_temp 所在目录，如 D:/sce_online）：
+/// `<项目>/script/tsconfig.json` 的 typeRoots 中找含 `Update/.../Res/_m` 的条目，
+/// 取其 `Update` 段之前的部分（typeRoots 形如 `<引擎根>/Update/<编辑器>/Res/_m/...`）。
+/// 兼容两种形态：`<引擎根>/Update/...` 与 `<Update 直接前缀>`（取前三层）。
 pub fn locate_editor_root(project_root: &Path) -> Option<PathBuf> {
     let path = project_root.join("script").join("tsconfig.json");
     let text = fs::read_to_string(&path).ok()?;
@@ -490,7 +492,8 @@ pub fn locate_editor_root(project_root: &Path) -> Option<PathBuf> {
     for root in type_roots.iter().filter_map(|v| v.as_str()) {
         let normalized = root.replace('\\', "/");
         let lower = normalized.to_lowercase();
-        if let Some(idx) = lower.find("/res/_m/") {
+        // 形态 1：.../update/.../res/_m/...  → 取 update 段之前（引擎运行根）
+        if let Some(idx) = lower.find("/update/") {
             let prefix = normalized[..idx].trim_end_matches('/');
             if !prefix.is_empty() {
                 return Some(PathBuf::from(prefix));
@@ -500,14 +503,14 @@ pub fn locate_editor_root(project_root: &Path) -> Option<PathBuf> {
     None
 }
 
-/// 清空编辑器根目录下的 logs / logs_subprocess / logs_temp（保留目录本身）。
-/// 返回清理的目录数；编辑器根不可推导时报错。
+/// 清空引擎运行根下的 logs / logs_subprocess / logs_temp（保留目录本身）。
+/// 返回清理的目录数；引擎根不可推导时报错。
 pub fn clean_engine_logs(project_root: &Path) -> Result<usize, String> {
-    let editor_root = locate_editor_root(project_root)
-        .ok_or_else(|| "无法从当前项目推导编辑器根目录（检查 script/tsconfig.json 的 typeRoots）".to_string())?;
+    let engine_root = locate_editor_root(project_root)
+        .ok_or_else(|| "无法从当前项目推导引擎运行根（检查 script/tsconfig.json 的 typeRoots）".to_string())?;
     let mut cleaned = 0usize;
     for name in ["logs", "logs_subprocess", "logs_temp"] {
-        let dir = editor_root.join(name);
+        let dir = engine_root.join(name);
         if dir.is_dir() {
             fs::remove_dir_all(&dir).map_err(|e| format!("删除 {} 失败: {e}", dir.display()))?;
             fs::create_dir_all(&dir).map_err(|e| format!("重建 {} 失败: {e}", dir.display()))?;
