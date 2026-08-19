@@ -25,3 +25,22 @@ pub fn http_client(proxy: &str, token: &str) -> Result<reqwest::blocking::Client
     }
     builder.build().context("无法创建 HTTP 客户端")
 }
+
+/// 构造 reqwest 异步客户端（0.7.2 起：网络等待让出线程，消除 GUI 假死感）
+pub fn async_http_client(proxy: &str, token: &str) -> Result<reqwest::Client> {
+    let mut builder = reqwest::Client::builder().user_agent("BGD_SCE_TOOLS");
+    let proxy = proxy.trim();
+    if !proxy.is_empty() {
+        builder = builder.proxy(reqwest::Proxy::all(proxy).context("代理地址无效")?);
+    }
+    let token = token.trim();
+    if !token.is_empty() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        let mut value = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}"))
+            .context("GitHub Token 含非法字符")?;
+        value.set_sensitive(true);
+        headers.insert(reqwest::header::AUTHORIZATION, value);
+        builder = builder.default_headers(headers);
+    }
+    builder.build().context("无法创建 HTTP 客户端")
+}

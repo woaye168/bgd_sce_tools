@@ -410,10 +410,12 @@ fn update_framework(app: AppHandle, state: State<AppState>) -> Result<project::U
 /// 拉取应用市场清单（0.7.1 起：只拉 registry 骨架并播种自启默认，不做元数据补全——
 /// 补全由前端逐应用调 enrich_app 异步完成，保证应用页即时显示）
 #[tauri::command]
-fn fetch_app_registry(app: AppHandle, url: String) -> Result<apps::AppRegistry, String> {
+async fn fetch_app_registry(app: AppHandle, url: String) -> Result<apps::AppRegistry, String> {
     let proxy = load_proxy(&app);
     let token = load_token(&app);
-    let registry = apps::fetch_registry(&url, &proxy, &token).map_err(|e| e.to_string())?;
+    let registry = apps::fetch_registry_async(&url, &proxy, &token)
+        .await
+        .map_err(|e| e.to_string())?;
 
     // 静默自启下发默认：registry 声明 default_auto_start 的应用，
     // 用户未勾选且未显式取消过时播种进本机配置；用户本机记忆（含取消）优先，不再覆盖
@@ -438,16 +440,18 @@ fn fetch_app_registry(app: AppHandle, url: String) -> Result<apps::AppRegistry, 
 
 /// 单应用元数据补全（应用页逐应用异步加载：版本/描述/作者/asset名/版本说明）
 #[tauri::command]
-fn enrich_app(app: AppHandle, mut app_info: apps::AppInfo) -> Result<apps::AppInfo, String> {
+async fn enrich_app(app: AppHandle, mut app_info: apps::AppInfo) -> Result<apps::AppInfo, String> {
     let proxy = load_proxy(&app);
     let token = load_token(&app);
-    apps::enrich_app(&mut app_info, &proxy, &token).map_err(|e| e.to_string())?;
+    apps::enrich_app_async(&mut app_info, &proxy, &token)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(app_info)
 }
 
 /// 安装应用（下载 exe 到 <宿主>/apps/{id}/）
 #[tauri::command]
-fn install_app(app: AppHandle, state: State<AppState>, app_info: apps::AppInfo) -> Result<(), String> {
+async fn install_app(app: AppHandle, state: State<'_, AppState>, app_info: apps::AppInfo) -> Result<(), String> {
     let proxy = load_proxy(&app);
     let token = load_token(&app);
 
@@ -457,7 +461,9 @@ fn install_app(app: AppHandle, state: State<AppState>, app_info: apps::AppInfo) 
     if was_running {
         apps::stop_app(&app_info.id).map_err(|e| format!("停止运行中的 {app_info} 失败: {e}", app_info = app_info.id))?;
     }
-    apps::install_app(&app_info, &proxy, &token).map_err(|e| e.to_string())?;
+    apps::install_app_async(&app_info, &proxy, &token)
+        .await
+        .map_err(|e| e.to_string())?;
 
     if was_running {
         let auto = app
