@@ -469,7 +469,16 @@ async fn install_app(app: AppHandle, state: State<'_, AppState>, app_info: apps:
     if was_running {
         apps::stop_app(&app_info.id).map_err(|e| format!("停止运行中的 {app_info} 失败: {e}", app_info = app_info.id))?;
     }
-    apps::install_app_async(&app_info, &proxy, &token)
+    // 下载进度回调：向前端发事件（AppPage 显示 已下载/总大小）
+    let app_handle = app.clone();
+    let app_id = app_info.id.clone();
+    let on_progress = move |downloaded: u64, total: Option<u64>| {
+        let _ = app_handle.emit(
+            "app-download-progress",
+            serde_json::json!({ "id": app_id, "downloaded": downloaded, "total": total }),
+        );
+    };
+    apps::install_app_async(&app_info, &proxy, &token, on_progress)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -481,7 +490,8 @@ async fn install_app(app: AppHandle, state: State<'_, AppState>, app_info: apps:
             .unwrap_or(false);
         let exe = apps::app_exe_path(&app_info.id).map_err(|e| e.to_string())?;
         let mut cmd = std::process::Command::new(&exe);
-        if let Some(root) = state.project.lock().map_err(|e| e.to_string())?.as_ref() {
+        let project_root = state.project.lock().map_err(|e| e.to_string())?.clone();
+        if let Some(root) = &project_root {
             cmd.arg("--project-path").arg(root);
         }
         if auto {
@@ -493,6 +503,18 @@ async fn install_app(app: AppHandle, state: State<'_, AppState>, app_info: apps:
             cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
         }
         let _ = cmd.spawn();
+
+        // 升级完成后再发一次 notify（带 project_path）：触发应用 refresh——静默驻留实例
+        // 也会立即执行 bridge dll 重部署等自同步（否则需打开界面/重启才生效）
+        if let Some(root) = &project_root {
+            let id = app_info.id.clone();
+            let pair = format!("project_path={}", root.display());
+            // 等应用完成启动（~1s）后通知，避免应用尚未就绪
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(1200));
+                apps::notify_app(&id, std::slice::from_ref(&pair));
+            });
+        }
     }
     Ok(())
 }

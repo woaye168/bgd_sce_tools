@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { api } from "../lib/api";
 import type { AppInfo, InstalledApp } from "../lib/types";
 import Card from "../components/Card";
@@ -105,13 +106,25 @@ export default function AppPage() {
   const install = async (app: AppInfo) => {
     setBusyId(app.id);
     setMessage(`正在安装 ${app.name}...`);
+    let unlisten: (() => void) | undefined;
     try {
+      // 下载进度事件：显示 已下载/总大小（M，2 位小数）
+      unlisten = await listen<{ id: string; downloaded: number; total: number | null }>(
+        "app-download-progress",
+        (ev) => {
+          if (ev.payload.id !== app.id) return;
+          const done = (ev.payload.downloaded / 1048576).toFixed(2);
+          const total = ev.payload.total ? (ev.payload.total / 1048576).toFixed(2) : "?";
+          setMessage(`正在安装 ${app.name}... ${done}M / ${total}M`);
+        },
+      );
       await api.installApp(app);
       setMessage(`✔ ${app.name} 安装完成`);
       await refreshInstalled();
     } catch (e) {
       setMessage(`✘ 安装失败: ${String(e)}`);
     } finally {
+      unlisten?.();
       setBusyId(null);
     }
   };

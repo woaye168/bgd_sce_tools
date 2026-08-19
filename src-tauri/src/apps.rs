@@ -241,8 +241,14 @@ pub fn install_app(app: &AppInfo, proxy: &str, token: &str) -> Result<()> {
     install_app_with(app, &client, &dir)
 }
 
-/// 安装应用（async 版：Release 查询与 asset 下载让出线程）
-pub async fn install_app_async(app: &AppInfo, proxy: &str, token: &str) -> Result<()> {
+/// 安装应用（async 版：Release 查询与 asset 下载让出线程；
+/// `on_progress(downloaded, total)` 回调下载进度供前端显示）
+pub async fn install_app_async(
+    app: &AppInfo,
+    proxy: &str,
+    token: &str,
+    on_progress: impl Fn(u64, Option<u64>) + Send,
+) -> Result<()> {
     let dir = app_dir(&app.id)?;
     fs::create_dir_all(&dir).with_context(|| format!("创建应用目录失败: {}", dir.display()))?;
 
@@ -270,7 +276,7 @@ pub async fn install_app_async(app: &AppInfo, proxy: &str, token: &str) -> Resul
         .and_then(|a| a["url"].as_str().map(str::to_string))
         .ok_or_else(|| anyhow!("Release 中未找到附件 {}（{}）", app.asset_name, app.repo))?;
 
-    // 2. 下载 asset（octet-stream）到 exe 路径（覆盖写）
+    // 2. 流式下载 asset（octet-stream）到 exe 路径（覆盖写），回调进度
     let exe_path = dir.join(format!("{}.exe", app.id));
     let resp = client
         .get(&asset_url)
@@ -281,7 +287,18 @@ pub async fn install_app_async(app: &AppInfo, proxy: &str, token: &str) -> Resul
     if !resp.status().is_success() {
         return Err(anyhow!("下载应用附件失败: HTTP {}", resp.status()));
     }
-    let bytes = resp.bytes().await.context("读取应用附件失败")?;
+    let total = resp.content_length();
+    let mut bytes = Vec::with_capacity(total.unwrap_or(0) as usize);
+    let mut downloaded = 0u64;
+    on_progress(0, total);
+    use futures_util::StreamExt;
+    let mut s = resp.bytes_stream();
+    while let Some(chunk) = s.next().await {
+        let chunk = chunk.context("读取下载流失败")?;
+        downloaded += chunk.len() as u64;
+        on_progress(downloaded, total);
+        bytes.extend_from_slice(&chunk);
+    }
     fs::write(&exe_path, &bytes).with_context(|| format!("写入应用文件失败: {}", exe_path.display()))?;
 
     // 3. 写 app.json（记录已安装版本/元数据，供升级判断）
