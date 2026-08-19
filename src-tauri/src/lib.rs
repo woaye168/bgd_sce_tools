@@ -304,6 +304,14 @@ fn clean_logs(app: AppHandle, state: State<AppState>) -> Result<usize, String> {
     builder::clean_logs(&bgd_root, &log).map_err(|e| e.to_string())
 }
 
+/// 清理编辑器引擎日志（logs / logs_subprocess / logs_temp）
+#[tauri::command]
+fn clean_engine_logs(state: State<AppState>) -> Result<usize, String> {
+    let bgd_root = state.bgd_root()?;
+    let root = bgd_root.parent().ok_or("无法推导项目根")?;
+    project::clean_engine_logs(root).map_err(|e| e.to_string())
+}
+
 // ---------------------------------------------------------------- 监听命令
 
 #[tauri::command]
@@ -606,6 +614,7 @@ pub fn run() {
             full_build,
             clean_build,
             clean_logs,
+            clean_engine_logs,
             start_watch,
             stop_watch,
             is_watching,

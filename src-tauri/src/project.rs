@@ -473,3 +473,46 @@ pub fn update_framework(project_root: &Path, repo: &str, proxy: &str, token: &st
     ));
     Ok(report)
 }
+
+// ---------------------------------------------------------------- 引擎日志清理
+
+/// 从当前项目推导编辑器根目录（与 sce_app_editor-patch 同款定位链：
+/// `<项目>/script/tsconfig.json` 的 typeRoots 中找含 `Res/_m` 的条目，取其前缀）
+pub fn locate_editor_root(project_root: &Path) -> Option<PathBuf> {
+    let path = project_root.join("script").join("tsconfig.json");
+    let text = fs::read_to_string(&path).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let type_roots = json
+        .get("compilerOptions")
+        .and_then(|c| c.get("typeRoots"))
+        .or_else(|| json.get("typeRoots"))
+        .and_then(|v| v.as_array())?;
+    for root in type_roots.iter().filter_map(|v| v.as_str()) {
+        let normalized = root.replace('\\', "/");
+        let lower = normalized.to_lowercase();
+        if let Some(idx) = lower.find("/res/_m/") {
+            let prefix = normalized[..idx].trim_end_matches('/');
+            if !prefix.is_empty() {
+                return Some(PathBuf::from(prefix));
+            }
+        }
+    }
+    None
+}
+
+/// 清空编辑器根目录下的 logs / logs_subprocess / logs_temp（保留目录本身）。
+/// 返回清理的目录数；编辑器根不可推导时报错。
+pub fn clean_engine_logs(project_root: &Path) -> Result<usize, String> {
+    let editor_root = locate_editor_root(project_root)
+        .ok_or_else(|| "无法从当前项目推导编辑器根目录（检查 script/tsconfig.json 的 typeRoots）".to_string())?;
+    let mut cleaned = 0usize;
+    for name in ["logs", "logs_subprocess", "logs_temp"] {
+        let dir = editor_root.join(name);
+        if dir.is_dir() {
+            fs::remove_dir_all(&dir).map_err(|e| format!("删除 {} 失败: {e}", dir.display()))?;
+            fs::create_dir_all(&dir).map_err(|e| format!("重建 {} 失败: {e}", dir.display()))?;
+            cleaned += 1;
+        }
+    }
+    Ok(cleaned)
+}

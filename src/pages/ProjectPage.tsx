@@ -47,6 +47,24 @@ export default function ProjectPage({ onProjectChanged }: ProjectPageProps) {
     onProjectChanged();
   };
 
+  /** 清理编辑器引擎日志（logs / logs_subprocess / logs_temp） */
+  const cleanEngineLogs = async () => {
+    if (!current) {
+      setMessage("✘ 请先选择项目");
+      return;
+    }
+    setBusy(true);
+    setMessage("正在清理引擎日志...");
+    try {
+      const count = await api.cleanEngineLogs();
+      setMessage(`✔ 引擎日志已清理（${count} 个目录）`);
+    } catch (e) {
+      setMessage(`✘ 清理失败: ${String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const initProject = async () => {
     // 直接对当前项目初始化，不再弹目录选择
     if (!current) {
@@ -136,13 +154,22 @@ export default function ProjectPage({ onProjectChanged }: ProjectPageProps) {
         <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">
           从框架仓库下载最新框架，生成 .bgd 目录、.emmyrc.json、.gitignore。
         </p>
-        <button
-          onClick={initProject}
-          disabled={busy || info?.initialized === true}
-          className="rounded-lg bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-500 disabled:opacity-50"
-        >
-          {busy ? "初始化中..." : "初始化项目"}
-        </button>
+        <div className="flex flex-wrap gap-3">
+          <button
+            onClick={initProject}
+            disabled={busy || info?.initialized === true}
+            className="rounded-lg bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-500 disabled:opacity-50"
+          >
+            {busy ? "初始化中..." : "初始化项目"}
+          </button>
+          <button
+            onClick={cleanEngineLogs}
+            disabled={busy || !current}
+            className="rounded-lg bg-slate-600 px-4 py-2 text-sm text-white hover:bg-slate-500 disabled:opacity-50"
+          >
+            清理引擎日志
+          </button>
+        </div>
         {info?.initialized === true && (
           <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
             当前项目已初始化，如需重新初始化删除 init.lock

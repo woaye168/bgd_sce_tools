@@ -27,6 +27,7 @@ export const api = {
   fullBuild: () => invoke<void>("full_build"),
   cleanBuild: () => invoke<void>("clean_build"),
   cleanLogs: () => invoke<number>("clean_logs"),
+  cleanEngineLogs: () => invoke<number>("clean_engine_logs"),
 
   startWatch: () => invoke<void>("start_watch"),
   stopWatch: () => invoke<void>("stop_watch"),
