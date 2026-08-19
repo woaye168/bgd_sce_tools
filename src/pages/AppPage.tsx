@@ -53,8 +53,19 @@ export default function AppPage() {
     setMessage("正在拉取应用清单...");
     try {
       const reg = await api.fetchAppRegistry(registryUrl);
+      // 立即显示骨架（仅 id/name），逐应用异步补全元数据（加载失败的条目隐藏）
       setMarket(reg.apps);
       setMessage(reg.apps.length ? "" : "清单中没有应用");
+      reg.apps.forEach((app) => {
+        api
+          .enrichApp(app)
+          .then((full) => {
+            setMarket((prev) => prev.map((a) => (a.id === full.id ? full : a)));
+          })
+          .catch(() => {
+            setMarket((prev) => prev.filter((a) => a.id !== app.id));
+          });
+      });
     } catch (e) {
       setMessage(`✘ 拉取清单失败: ${String(e)}`);
     }
@@ -195,7 +206,11 @@ export default function AppPage() {
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
                     {app.name}
-                    <span className="ml-2 text-xs text-slate-400">v{app.version}</span>
+                    {app.version ? (
+                      <span className="ml-2 text-xs text-slate-400">v{app.version}</span>
+                    ) : (
+                      <span className="ml-2 text-xs text-slate-300 dark:text-slate-600">加载中…</span>
+                    )}
                     {app.author && (
                       <span className="ml-2 text-xs text-slate-400">· {app.author}</span>
                     )}

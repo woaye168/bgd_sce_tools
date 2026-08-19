@@ -24,7 +24,7 @@ BGD 工作室 · 星火编辑器（SCE）Lua 框架构建工具（Windows 桌面
 - **配置设定**：`bgd_default.json`（框架下发）+ `bgd.json`（项目覆盖）双层配置；网络代理与 GitHub Token 设置（对更新检查、框架下载、应用市场生效）
 - **私有仓库访问**：仓库已转私有，所有 GitHub 链路（框架下载/更新、应用市场、自我更新）通过应用设置里的 fine-grained PAT 认证
 - **自我更新**：启动后可在【关于】页检查更新，自动下载安装新版本（自建逻辑：认证查询最新 Release → 下载 NSIS 安装包 → 启动安装）
-- **应用市场**：安装/升级/卸载独立应用（如模块To触编、编辑器补丁）；清单版本高于已安装版本时显示「升级」按钮，一键覆盖更新；支持应用「随主程序启动」（静默拉起，单开）
+- **应用市场**：安装/升级/卸载独立应用（如模块To触编、编辑器补丁）；清单来自 [bgd_sce_appsdk](https://github.com/woaye168/bgd_sce_appsdk) 的极简 registry，版本/描述/版本说明由应用仓库 CI 合成的 app-release.json 提供；有新版显示「升级」按钮（可展开版本说明），一键覆盖更新（运行中的实例自动停止后装回）；支持应用「静默自启」（后台拉起，单开唤起；宿主退出联动关闭）
 - **界面**：侧边栏布局，明/暗主题切换，构建日志实时输出
 
 ## 下载安装
@@ -51,7 +51,7 @@ GitHub 直连不稳定时：【设置】页 → "通用设置" → 填入本机�
 框架/插件/工具仓库均为**私有仓库**，首次使用必须配置 Token，否则框架下载/更新、应用市场、自我更新全部不可用：
 
 1. GitHub → Settings → Developer settings → Personal access tokens → **Fine-grained tokens** → Generate new token
-2. Repository access 选 **Only select repositories**，勾选 `bgd_sce_tools` / `bgd_sce_framework` / `bgd_sce_plugins` / `sce_app_visual-injector` / `sce_app_editor-patch`（后续新增应用仓库同样要加）
+2. Repository access 选 **Only select repositories**，勾选 `bgd_sce_tools` / `bgd_sce_framework` / `bgd_sce_appsdk` / `sce_app_visual-injector` / `sce_app_editor-patch`（后续新增应用仓库同样要加）
 3. Permissions 只需 **Contents: Read-only**
 4. 生成后填入：【设置】页 → "通用设置" → GitHub Token → 保存（或 CLI：`bgd_sce_tools setting set github_token <PAT>`）
 

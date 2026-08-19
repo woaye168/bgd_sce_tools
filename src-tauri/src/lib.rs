@@ -407,16 +407,15 @@ fn update_framework(app: AppHandle, state: State<AppState>) -> Result<project::U
 
 // ---------------------------------------------------------------- 应用（WeGame 模式）
 
-/// 拉取应用市场清单
+/// 拉取应用市场清单（0.7.1 起：只拉 registry 骨架并播种自启默认，不做元数据补全——
+/// 补全由前端逐应用调 enrich_app 异步完成，保证应用页即时显示）
 #[tauri::command]
 fn fetch_app_registry(app: AppHandle, url: String) -> Result<apps::AppRegistry, String> {
     let proxy = load_proxy(&app);
     let token = load_token(&app);
-    let mut registry = apps::fetch_registry(&url, &proxy, &token).map_err(|e| e.to_string())?;
-    // 用各应用仓库的 app-release.json 补全版本/描述/版本说明等元数据（极简 registry 链路）
-    apps::enrich_registry(&mut registry, &proxy, &token);
+    let registry = apps::fetch_registry(&url, &proxy, &token).map_err(|e| e.to_string())?;
 
-    // 静默自启下发默认（0.6.8）：registry 声明 default_auto_start 的应用，
+    // 静默自启下发默认：registry 声明 default_auto_start 的应用，
     // 用户未勾选且未显式取消过时播种进本机配置；用户本机记忆（含取消）优先，不再覆盖
     if let Ok(dir) = app.path().app_config_dir() {
         let mut settings = project::load_settings(&dir);
@@ -435,6 +434,15 @@ fn fetch_app_registry(app: AppHandle, url: String) -> Result<apps::AppRegistry, 
         }
     }
     Ok(registry)
+}
+
+/// 单应用元数据补全（应用页逐应用异步加载：版本/描述/作者/asset名/版本说明）
+#[tauri::command]
+fn enrich_app(app: AppHandle, mut app_info: apps::AppInfo) -> Result<apps::AppInfo, String> {
+    let proxy = load_proxy(&app);
+    let token = load_token(&app);
+    apps::enrich_app(&mut app_info, &proxy, &token).map_err(|e| e.to_string())?;
+    Ok(app_info)
 }
 
 /// 安装应用（下载 exe 到 <宿主>/apps/{id}/）
@@ -601,6 +609,7 @@ pub fn run() {
             get_app_settings,
             save_app_settings,
             fetch_app_registry,
+            enrich_app,
             install_app,
             uninstall_app,
             get_installed_apps,

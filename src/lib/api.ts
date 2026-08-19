@@ -50,6 +50,8 @@ export const api = {
   // 应用（WeGame 模式）
   fetchAppRegistry: (url: string) =>
     invoke<AppRegistry>("fetch_app_registry", { url }),
+  enrichApp: (appInfo: AppInfo) =>
+    invoke<AppInfo>("enrich_app", { appInfo }),
   installApp: (appInfo: AppInfo) =>
     invoke<void>("install_app", { appInfo }),
   uninstallApp: (appId: string) => invoke<void>("uninstall_app", { appId }),

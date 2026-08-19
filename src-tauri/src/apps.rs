@@ -114,28 +114,32 @@ pub fn fetch_registry(url: &str, proxy: &str, token: &str) -> Result<AppRegistry
 /// （版本/描述/作者/asset名/版本说明/默认自启）。asset 不存在时保留 registry 原值（过渡期兼容）。
 pub fn enrich_registry(registry: &mut AppRegistry, proxy: &str, token: &str) {
     for app in &mut registry.apps {
-        let Ok(meta) = fetch_release_meta(&app.repo, proxy, token) else {
-            continue;
-        };
-        if !meta.version.is_empty() {
-            app.version = meta.version;
-        }
-        if !meta.description.is_empty() {
-            app.description = meta.description;
-        }
-        if !meta.author.is_empty() {
-            app.author = meta.author;
-        }
-        if !meta.asset_name.is_empty() {
-            app.asset_name = meta.asset_name;
-        }
-        if !meta.release_notes.is_empty() {
-            app.release_notes = meta.release_notes;
-        }
-        if meta.default_auto_start {
-            app.default_auto_start = true;
-        }
+        let _ = enrich_app(app, proxy, token);
     }
+}
+
+/// 单应用元数据补全（0.7.1 应用页「逐应用异步加载」用）。返回是否成功。
+pub fn enrich_app(app: &mut AppInfo, proxy: &str, token: &str) -> Result<()> {
+    let meta = fetch_release_meta(&app.repo, proxy, token)?;
+    if !meta.version.is_empty() {
+        app.version = meta.version;
+    }
+    if !meta.description.is_empty() {
+        app.description = meta.description;
+    }
+    if !meta.author.is_empty() {
+        app.author = meta.author;
+    }
+    if !meta.asset_name.is_empty() {
+        app.asset_name = meta.asset_name;
+    }
+    if !meta.release_notes.is_empty() {
+        app.release_notes = meta.release_notes;
+    }
+    if meta.default_auto_start {
+        app.default_auto_start = true;
+    }
+    Ok(())
 }
 
 /// 拉取应用仓库 releases/latest 中的 app-release.json asset（CI 合成发布元数据）
