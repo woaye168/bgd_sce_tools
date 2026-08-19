@@ -66,6 +66,11 @@ pub fn app_exe_path(id: &str) -> Result<PathBuf> {
     Ok(app_dir(id)?.join(format!("{id}.exe")))
 }
 
+/// 应用目录是否已存在（区分首次安装与升级覆盖）
+pub fn app_dir_exists(id: &str) -> bool {
+    app_dir(id).map(|d| d.is_dir()).unwrap_or(false)
+}
+
 // ---------------------------------------------------------------- 清单拉取
 
 /// 从远程清单 URL 拉取应用列表
@@ -172,48 +177,76 @@ pub fn list_installed() -> Result<Vec<InstalledApp>> {
     Ok(apps)
 }
 
-// ---------------------------------------------------------------- 自启动（随主程序静默启动，0.6.6）
+// ---------------------------------------------------------------- 静默自启（0.6.6 引入，0.6.7 优化）
 
-/// 应用是否已在运行（按 exe 全路径匹配进程，兼容大小写与斜杠）
-pub fn is_app_running(exe: &std::path::Path) -> bool {
-    let want = exe.display().to_string().replace('/', "\\").to_lowercase();
-    let Ok(out) = std::process::Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-Command",
-            "Get-CimInstance Win32_Process | Select-Object ProcessId,ExecutablePath | ConvertTo-Json -Compress",
-        ])
-        .output()
-    else {
-        return false;
+/// 子进程创建不显示控制台窗口（修复「黑终端」闪现）
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+/// 进程 exe 全路径列表一次性获取（小写、反斜杠归一）。
+/// 启动只调一次（~1s），所有应用的「是否在运行」判断在内存中匹配。
+fn running_exe_paths() -> Vec<String> {
+    let mut cmd = std::process::Command::new("powershell");
+    cmd.args([
+        "-NoProfile",
+        "-Command",
+        "Get-CimInstance Win32_Process | Select-Object ProcessId,ExecutablePath | ConvertTo-Json -Compress",
+    ]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let Ok(out) = cmd.output() else {
+        return Vec::new();
     };
     let text = String::from_utf8_lossy(&out.stdout);
     let Ok(doc) = serde_json::from_str::<serde_json::Value>(&text) else {
-        return false;
+        return Vec::new();
     };
     let list = match &doc {
         serde_json::Value::Array(a) => a.clone(),
         serde_json::Value::Object(_) => vec![doc],
-        _ => return false,
+        _ => return Vec::new(),
     };
-    list.iter().any(|p| {
-        p["ExecutablePath"]
-            .as_str()
-            .map(|s| s.to_lowercase() == want)
-            .unwrap_or(false)
-    })
+    list.iter()
+        .filter_map(|p| p["ExecutablePath"].as_str().map(|s| s.to_lowercase()))
+        .collect()
 }
 
-/// 随主程序静默启动配置的应用（单开：已在运行跳过；有当前项目则透传 --project-path）
+/// 在已获取的进程列表中判断应用是否运行
+fn is_running_in(exe: &std::path::Path, running: &[String]) -> bool {
+    let want = exe.display().to_string().replace('/', "\\").to_lowercase();
+    running.iter().any(|p| p == &want)
+}
+
+/// 应用是否已在运行（按 exe 全路径匹配进程，兼容大小写与斜杠）
+pub fn is_app_running(exe: &std::path::Path) -> bool {
+    is_running_in(exe, &running_exe_paths())
+}
+
+/// 静默自启配置的应用（单开：已在运行跳过；有当前项目则透传 --project-path）。
+/// 进程列表只查一次；调用方负责在后台线程执行（不阻塞宿主 GUI 首屏）。
 pub fn autostart_apps(ids: &[String], project: Option<&std::path::Path>) {
+    if ids.is_empty() {
+        return;
+    }
+    let running = running_exe_paths();
     for id in ids {
         let Ok(exe) = app_exe_path(id) else { continue };
-        if !exe.is_file() || is_app_running(&exe) {
+        if !exe.is_file() || is_running_in(&exe, &running) {
             continue;
         }
         let mut cmd = std::process::Command::new(&exe);
         if let Some(p) = project {
             cmd.arg("--project-path").arg(p);
+        }
+        // 静默自启语义：透传 --background，由应用自行决定是否以无窗口形态驻留
+        cmd.arg("--background");
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(CREATE_NO_WINDOW);
         }
         let _ = cmd.spawn();
     }

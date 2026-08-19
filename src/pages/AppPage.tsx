@@ -23,16 +23,16 @@ export default function AppPage() {
       .catch(() => {});
   }, []);
 
-  /** 切换应用「随主程序启动」（静默启动；单开：已在运行不重复拉起） */
+  /** 切换应用「静默自启」（随宿主启动静默拉起；单开：已在运行不重复拉起） */
   const toggleAutoStart = async (id: string, on: boolean) => {
     const next = on ? [...autoStart, id] : autoStart.filter((x) => x !== id);
     setAutoStart(next);
     try {
       const s = await api.getAppSettings();
       await api.saveAppSettings({ ...s, auto_start_apps: next });
-      setMessage(on ? `✔ 已设置随主程序启动` : `✔ 已取消随主程序启动`);
+      setMessage(on ? `✔ 已设置静默自启` : `✔ 已取消静默自启`);
     } catch (e) {
-      setMessage(`✘ 保存自启动配置失败: ${String(e)}`);
+      setMessage(`✘ 保存静默自启配置失败: ${String(e)}`);
     }
   };
 
@@ -159,7 +159,7 @@ export default function AppPage() {
                       checked={autoStart.includes(app.id)}
                       onChange={(e) => toggleAutoStart(app.id, e.target.checked)}
                     />
-                    随主程序启动
+                    静默自启
                   </label>
                   <button
                     onClick={() => open(app)}

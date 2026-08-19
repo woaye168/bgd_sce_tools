@@ -409,7 +409,21 @@ fn fetch_app_registry(app: AppHandle, url: String) -> Result<apps::AppRegistry, 
 fn install_app(app: AppHandle, app_info: apps::AppInfo) -> Result<(), String> {
     let proxy = load_proxy(&app);
     let token = load_token(&app);
-    apps::install_app(&app_info, &proxy, &token).map_err(|e| e.to_string())
+    // 首次安装标记（升级覆盖不重置用户配置）
+    let first_install = !apps::app_dir_exists(&app_info.id);
+    apps::install_app(&app_info, &proxy, &token).map_err(|e| e.to_string())?;
+
+    // 编辑器补丁默认静默自启（0.6.7）：仅首次安装时播种，用户手动取消后不再重置
+    if first_install && app_info.id == "editor-patch" {
+        if let Ok(dir) = app.path().app_config_dir() {
+            let mut settings = project::load_settings(&dir);
+            if !settings.auto_start_apps.iter().any(|id| id == "editor-patch") {
+                settings.auto_start_apps.push("editor-patch".to_string());
+                project::save_settings(&dir, &settings).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// 卸载应用
@@ -431,13 +445,19 @@ fn start_app(state: State<AppState>, app_id: String) -> Result<(), String> {
     if !app_exe.is_file() {
         return Err(format!("应用 {app_id} 未安装"));
     }
-    if apps::is_app_running(&app_exe) {
+    // 单开守卫；editor-patch 自身实现了单实例唤起（重复启动只唤出窗口），放行由它去重
+    if app_id != "editor-patch" && apps::is_app_running(&app_exe) {
         return Err(format!("应用 {app_id} 已在运行（单开限制）"));
     }
-    let mut cmd = std::process::Command::new(app_exe);
+    let mut cmd = std::process::Command::new(&app_exe);
     // 有当前项目则传 --project-path（应用可选实现）
     if let Some(root) = state.project.lock().map_err(|e| e.to_string())?.as_ref() {
         cmd.arg("--project-path").arg(root);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
     }
     cmd.spawn().map_err(|e| format!("启动应用失败: {e}"))?;
     Ok(())
@@ -478,7 +498,7 @@ pub fn run() {
             let Ok(dir) = handle.path().app_config_dir() else {
                 return Ok(());
             };
-            // 自启动应用（0.6.6）：随主程序静默启动配置的应用（单开，已在运行跳过）
+            // 静默自启（0.6.6 引入，0.6.7 异步化）：后台线程执行，不阻塞 GUI 首屏
             {
                 let settings = project::load_settings(&dir);
                 if !settings.auto_start_apps.is_empty() {
@@ -487,7 +507,10 @@ pub fn run() {
                         .first()
                         .map(PathBuf::from)
                         .filter(|p| p.is_dir());
-                    apps::autostart_apps(&settings.auto_start_apps, proj.as_deref());
+                    let ids = settings.auto_start_apps.clone();
+                    std::thread::spawn(move || {
+                        apps::autostart_apps(&ids, proj.as_deref());
+                    });
                 }
             }
             // 启动恢复：默认选中最近项目；若上次监听为开则自动开启
