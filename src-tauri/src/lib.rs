@@ -527,10 +527,18 @@ async fn install_app(app: AppHandle, state: State<'_, AppState>, app_info: apps:
 
     // 升级前若实例在运行（静默自启/手动打开的），先停止再覆盖——否则 exe 被锁定写入失败。
     // 先 --quit 优雅退出（应用支持时），兜底 taskkill；装完若之前在跑则按自启配置重启。
-    let was_running = apps::is_app_running(&apps::app_exe_path(&app_info.id).map_err(|e| e.to_string())?);
-    if was_running {
-        apps::stop_app(&app_info.id).map_err(|e| format!("停止运行中的 {} 失败: {e}", app_info.id))?;
-    }
+    // 进程枚举要 spawn PowerShell（~1s），stop_app 含轮询等待，全部移出异步运行时线程
+    let id = app_info.id.clone();
+    let was_running = tauri::async_runtime::spawn_blocking(move || {
+        let running = apps::is_app_running(&apps::app_exe_path(&id)?);
+        if running {
+            apps::stop_app(&id)?;
+        }
+        Ok::<bool, anyhow::Error>(running)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| format!("停止运行中的应用失败: {e}"))?;
     // 下载进度回调：向前端发事件（AppPage 显示 已下载/总大小）
     let on_progress = crate::net::progress_emitter(&app, "app-download-progress", Some(app_info.id.clone()));
     apps::install_app_async(&app_info, &proxy, &token, on_progress)
@@ -587,15 +595,20 @@ fn get_installed_apps() -> Result<Vec<apps::InstalledApp>, String> {
 }
 
 /// 启动应用 EXE（有当前项目则传 --project-path；单开：已在运行不重复拉起）
+/// async：进程枚举（spawn PowerShell ~1s）移到 blocking 线程池，不再卡 UI
 #[tauri::command]
-fn start_app(state: State<AppState>, app_id: String) -> Result<(), String> {
+async fn start_app(state: State<'_, AppState>, app_id: String) -> Result<(), String> {
     let app_exe = apps::app_exe_path(&app_id).map_err(|e| e.to_string())?;
     if !app_exe.is_file() {
         return Err(format!("应用 {app_id} 未安装"));
     }
     // 单开守卫：已在运行不重复拉起（所有接入 bgd_appsdk 的应用都自带单实例唤起，
     // 放行由应用自身去重并唤出窗口——不再特例 editor-patch）
-    if apps::is_app_running(&app_exe) {
+    let exe = app_exe.clone();
+    let running = tauri::async_runtime::spawn_blocking(move || apps::is_app_running(&exe))
+        .await
+        .map_err(|e| e.to_string())?;
+    if running {
         return Err(format!("应用 {app_id} 已在运行（单开限制）"));
     }
     let mut cmd = std::process::Command::new(&app_exe);
