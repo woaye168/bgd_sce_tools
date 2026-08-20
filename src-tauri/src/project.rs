@@ -49,29 +49,10 @@ pub fn app_config_dir() -> Result<PathBuf> {
 
 pub fn load_settings(app_data_dir: &Path) -> AppSettings {
     let path = app_data_dir.join("settings.json");
-    let mut value: serde_json::Value = fs::read_to_string(&path)
+    let value: serde_json::Value = fs::read_to_string(&path)
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok())
         .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
-    // 迁移：旧版本 token 明文存于 settings.json——迁入凭据管理器并读回校验成功后，
-    // 才从文件移除并写回（凭据后端不可用时保留明文，防 token 丢失）
-    if let Some(token) = value
-        .get("github_token")
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-    {
-        let migrated = crate::secret::save_github_token(&token).is_ok()
-            && crate::secret::load_github_token() == token;
-        if migrated {
-            if let Some(obj) = value.as_object_mut() {
-                obj.remove("github_token");
-                if let Ok(text) = serde_json::to_string_pretty(&value) {
-                    let _ = fs::write(&path, text);
-                }
-            }
-        }
-    }
     let mut settings: AppSettings = serde_json::from_value(value).unwrap_or_default();
     settings.github_token = crate::secret::load_github_token();
     settings
@@ -151,6 +132,7 @@ async fn download_and_extract_async(
     on_progress: impl Fn(u64, Option<u64>) + Send,
 ) -> Result<PathBuf> {
     let bytes = crate::net::download_bytes_async(url, proxy, token, on_progress).await?;
+    crate::net::check_magic(&bytes, b"PK", "框架压缩包")?;
     extract_zip(bytes)
 }
 

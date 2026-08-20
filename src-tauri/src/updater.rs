@@ -92,6 +92,7 @@ pub async fn start_self_update_async(
         .ok_or_else(|| anyhow!("最新 Release 中找不到 NSIS 安装包（*-setup.exe）"))?;
 
     let bytes = crate::net::download_bytes_async(&asset_url, proxy, token, on_progress).await?;
+    crate::net::check_magic(&bytes, b"MZ", "安装包")?;
 
     let installer = std::env::temp_dir().join("bgd_sce_tools-update-setup.exe");
     std::fs::write(&installer, &bytes)

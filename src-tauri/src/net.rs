@@ -28,6 +28,8 @@ pub fn http_client(proxy: &str, token: &str) -> Result<reqwest::blocking::Client
 
 /// 流式下载 URL 到内存（async；`on_progress(downloaded, total)` 回调进度，total 未知为 None）。
 /// 统一供：应用安装、自我更新、框架下载——进度显示与下载逻辑只维护这一份。
+/// 一律带 `Accept: application/octet-stream`：GitHub release asset API 无此头会返回
+/// asset 元数据 JSON 而非二进制（曾导致把 1.6KB JSON 写成 exe 的事故）。
 pub async fn download_bytes_async(
     url: &str,
     proxy: &str,
@@ -36,6 +38,7 @@ pub async fn download_bytes_async(
 ) -> Result<Vec<u8>> {
     let resp = async_http_client(proxy, token)?
         .get(url)
+        .header(reqwest::header::ACCEPT, "application/octet-stream")
         .send()
         .await
         .with_context(|| format!("请求下载失败: {url}"))?;
@@ -55,6 +58,20 @@ pub async fn download_bytes_async(
         bytes.extend_from_slice(&chunk);
     }
     Ok(bytes)
+}
+
+/// 校验下载产物的文件魔数（防把错误响应体写盘：exe 期望 PE `MZ`，zip 期望 `PK`）。
+/// 失败时附带产物开头文本片段（通常是 JSON 错误体），便于定位真实原因。
+pub fn check_magic(bytes: &[u8], magic: &[u8], what: &str) -> Result<()> {
+    if bytes.starts_with(magic) {
+        return Ok(());
+    }
+    let head: String = bytes.iter().take(120).map(|&b| if b.is_ascii_graphic() || b == b' ' { b as char } else { '.' }).collect();
+    Err(anyhow::anyhow!(
+        "{what}下载产物无效（期望魔数 {:?}，实际 {} 字节），开头内容: {head}",
+        magic,
+        bytes.len()
+    ))
 }
 
 /// 向 Tauri 前端发送下载进度事件的便捷构造（事件名固定三处：

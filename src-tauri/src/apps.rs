@@ -218,6 +218,7 @@ pub async fn install_app_async(
     // 2. 流式下载 asset 到 exe 路径（覆盖写），回调进度（net 统一实现）
     let exe_path = dir.join(format!("{}.exe", app.id));
     let bytes = crate::net::download_bytes_async(&asset_url, proxy, token, on_progress).await?;
+    crate::net::check_magic(&bytes, b"MZ", "应用 exe")?;
     fs::write(&exe_path, &bytes).with_context(|| format!("写入应用文件失败: {}", exe_path.display()))?;
 
     // 3. 写 app.json（记录已安装版本/元数据，供升级判断）
