@@ -55,7 +55,7 @@ GitHub 直连不稳定时：【设置】页 → "通用设置" → 填入本机�
 3. Permissions 只需 **Contents: Read-only**
 4. 生成后填入：【设置】页 → "通用设置" → GitHub Token → 保存（或 CLI：`bgd_sce_tools setting set github_token <PAT>`）
 
-Token 仅存于本机应用设置（settings.json），不会写入任何项目或仓库。
+Token 仅存于本机 Windows 凭据管理器（条目 `bgd_sce_tools/github_token`），不会写入任何项目或仓库；settings.json 不落盘 token（旧版明文配置会在下次启动时自动迁移并清除）。
 
 **多台电脑使用**：Token 按机器各自配置。同一个 PAT 可以复制到多台电脑填用；更推荐每台电脑单独建一个 PAT（哪台不用了单独吊销哪个）。
 

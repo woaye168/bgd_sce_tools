@@ -28,6 +28,8 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
 ctrlc = "3"
 anyhow = "1"
+# 注意：keyring 3.x 无默认特性，必须显式启用 windows-native（否则静默退化为内存 mock store）
+keyring = { version = "3", default-features = false, features = ["windows-native"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_System_Console"] }

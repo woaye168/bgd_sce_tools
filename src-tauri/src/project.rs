@@ -24,7 +24,9 @@ pub struct AppSettings {
     /// 保存日志文件开关（开启后构建/监听日志写到 .bgd/log/build-YYYY-MM-DD.log）
     #[serde(default)]
     pub save_log: bool,
-    /// GitHub Token（fine-grained PAT，Contents 只读；私有仓库的框架/插件/自我更新均需要）
+    /// GitHub Token（fine-grained PAT，Contents 只读；私有仓库的框架/插件/自我更新均需要）。
+    /// 不落盘 settings.json——持久化在 Windows 凭据管理器（见 secret.rs）；
+    /// 字段保持可序列化（GUI/CLI 经 IPC 读写同一结构体），落盘前由 save_settings 剔除该键。
     #[serde(default)]
     pub github_token: String,
     /// 随主程序静默启动的应用 id 列表（0.6.6 起；单开：已在运行不重复拉起）
@@ -47,10 +49,32 @@ pub fn app_config_dir() -> Result<PathBuf> {
 
 pub fn load_settings(app_data_dir: &Path) -> AppSettings {
     let path = app_data_dir.join("settings.json");
-    fs::read_to_string(&path)
+    let mut value: serde_json::Value = fs::read_to_string(&path)
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok())
-        .unwrap_or_default()
+        .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
+    // 迁移：旧版本 token 明文存于 settings.json——迁入凭据管理器并读回校验成功后，
+    // 才从文件移除并写回（凭据后端不可用时保留明文，防 token 丢失）
+    if let Some(token) = value
+        .get("github_token")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+    {
+        let migrated = crate::secret::save_github_token(&token).is_ok()
+            && crate::secret::load_github_token() == token;
+        if migrated {
+            if let Some(obj) = value.as_object_mut() {
+                obj.remove("github_token");
+                if let Ok(text) = serde_json::to_string_pretty(&value) {
+                    let _ = fs::write(&path, text);
+                }
+            }
+        }
+    }
+    let mut settings: AppSettings = serde_json::from_value(value).unwrap_or_default();
+    settings.github_token = crate::secret::load_github_token();
+    settings
 }
 
 pub fn save_settings(app_data_dir: &Path, settings: &AppSettings) -> Result<()> {
@@ -58,7 +82,13 @@ pub fn save_settings(app_data_dir: &Path, settings: &AppSettings) -> Result<()> 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(&path, serde_json::to_string_pretty(settings)?)?;
+    // token 不落盘：序列化后剔除 github_token 键，真实值另存 Windows 凭据管理器
+    let mut value = serde_json::to_value(settings)?;
+    if let Some(obj) = value.as_object_mut() {
+        obj.remove("github_token");
+    }
+    fs::write(&path, serde_json::to_string_pretty(&value)?)?;
+    crate::secret::save_github_token(&settings.github_token)?;
     Ok(())
 }
 

@@ -5,6 +5,7 @@ pub mod builder;
 pub mod config;
 pub mod net;
 pub mod project;
+pub mod secret;
 pub mod updater;
 
 use config::BgdConfig;

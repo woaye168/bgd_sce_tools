@@ -80,8 +80,18 @@ pub fn apps_root() -> Result<PathBuf> {
     Ok(host_dir()?.join("apps"))
 }
 
+/// 应用 id 合法性校验：仅字母/数字/下划线/连字符，杜绝路径穿越写出 apps/ 外
+fn validate_app_id(id: &str) -> Result<()> {
+    if !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        Ok(())
+    } else {
+        Err(anyhow!("非法应用 id: {id:?}（仅允许字母/数字/下划线/连字符）"))
+    }
+}
+
 /// 单个应用目录：<宿主>/apps/{id}
 fn app_dir(id: &str) -> Result<PathBuf> {
+    validate_app_id(id)?;
     Ok(apps_root()?.join(id))
 }
 
@@ -443,5 +453,22 @@ pub fn stop_all_running_apps() {
     std::thread::sleep(std::time::Duration::from_secs(2));
     for id in &alive {
         let _ = stop_app(id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_app_id;
+
+    #[test]
+    fn app_id_validation() {
+        // 合法 id
+        for id in ["editor-patch", "visual-injector", "a-b_C9", "x"] {
+            assert!(validate_app_id(id).is_ok(), "应接受: {id}");
+        }
+        // 路径穿越与非法字符一律拒绝（安装/卸载/启动前经 app_dir 拦截）
+        for id in ["../x", "..", "a/b", "a\\b", "", "a b", "a.b", "a\0b"] {
+            assert!(validate_app_id(id).is_err(), "应拒绝: {id:?}");
+        }
     }
 }
