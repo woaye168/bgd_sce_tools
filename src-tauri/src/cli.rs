@@ -208,7 +208,7 @@ fn set_config_field(cfg: &mut BgdConfig, key: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
-const CMDS: [&str; 14] = [
+const CMDS: [&str; 11] = [
     "build",
     "watch",
     "clean",
@@ -220,9 +220,6 @@ const CMDS: [&str; 14] = [
     "config",
     "setting",
     "app",
-    "editor",
-    "logs",
-    "mcp",
 ];
 
 /// 是否命中 CLI 调用（供 main 决定是否 AttachConsole）
@@ -303,6 +300,8 @@ pub fn run() -> i32 {
                 let logger_arc = std::sync::Arc::clone(&logger);
                 let log = move |line: &str| logger_arc.log(line);
                 let _watcher = builder::start_watch(&bgd_root, &cfg, log)?;
+                // 写监听状态文件（与 GUI 路径同一契约，供 check-watch 跨进程判断）
+                builder::write_watch_state(&bgd_root, &cli.project);
                 // 前台阻塞直到 Ctrl+C
                 let running = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
                 let r = running.clone();
@@ -313,6 +312,7 @@ pub fn run() -> i32 {
                 while running.load(std::sync::atomic::Ordering::SeqCst) {
                     std::thread::sleep(std::time::Duration::from_millis(300));
                 }
+                builder::remove_watch_state(&bgd_root);
                 logger.log("监听已停止");
             }
             "config" => {
@@ -388,7 +388,8 @@ pub fn run() -> i32 {
                 cmd.spawn().with_context(|| format!("启动应用失败: {}", app_exe.display()))?;
                 logger.log(&format!("已启动应用: {app_id}（--project-path {}）", cli.project.display()));
             }
-            _ => unreachable!(),
+            // 未知子命令已在上方 CMDS 白名单拦截（退出码 2），此处仅为穷尽性兜底
+            other => return Err(anyhow::anyhow!("未知子命令: {other}")),
         }
         Ok(())
     })();

@@ -58,8 +58,11 @@ impl BgdConfig {
         if default_path.exists() {
             let text = fs::read_to_string(&default_path)
                 .with_context(|| format!("无法读取默认配置: {}", default_path.display()))?;
-            if let Ok(serde_json::Value::Object(obj)) = serde_json::from_str(&text) {
-                merged = obj;
+            match serde_json::from_str(&text)
+                .with_context(|| format!("默认配置 JSON 解析失败: {}", default_path.display()))?
+            {
+                serde_json::Value::Object(obj) => merged = obj,
+                _ => anyhow::bail!("默认配置不是 JSON 对象: {}", default_path.display()),
             }
         }
 
@@ -67,10 +70,15 @@ impl BgdConfig {
         if override_path.exists() {
             let text = fs::read_to_string(&override_path)
                 .with_context(|| format!("无法读取配置文件: {}", override_path.display()))?;
-            if let Ok(serde_json::Value::Object(obj)) = serde_json::from_str(&text) {
-                for (k, v) in obj {
-                    merged.insert(k, v);
+            match serde_json::from_str(&text)
+                .with_context(|| format!("配置文件 JSON 解析失败: {}", override_path.display()))?
+            {
+                serde_json::Value::Object(obj) => {
+                    for (k, v) in obj {
+                        merged.insert(k, v);
+                    }
                 }
+                _ => anyhow::bail!("配置文件不是 JSON 对象: {}", override_path.display()),
             }
         }
 

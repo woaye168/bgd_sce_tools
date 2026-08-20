@@ -64,20 +64,34 @@ pub fn remove_watch_state(bgd_root: &Path) {
     let _ = fs::remove_file(watch_state_path(bgd_root));
 }
 
-/// 判断指定 PID 的进程是否存活（Windows：tasklist 过滤；CREATE_NO_WINDOW 隐藏控制台）
+/// 判断指定 PID 的进程是否为「本工具的监听进程」：存活且映像名与当前 exe 一致
+/// （只校 PID 会被 PID 复用误判——状态文件里的旧 PID 可能已被无关进程占用）
 fn pid_alive(pid: u32) -> bool {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         use std::process::Command;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let want = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.file_stem().map(|s| s.to_string_lossy().to_lowercase()))
+            .unwrap_or_default();
         if let Ok(out) = Command::new("tasklist")
             .args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"])
             .creation_flags(CREATE_NO_WINDOW)
             .output()
         {
             let stdout = String::from_utf8_lossy(&out.stdout);
-            return !stdout.contains("No tasks") && stdout.contains(&pid.to_string());
+            // CSV 首字段为带引号的映像名（如 "bgd_sce_tools.exe"）
+            let image = stdout
+                .lines()
+                .next()
+                .and_then(|l| l.split(',').next())
+                .unwrap_or("")
+                .trim_matches('"')
+                .to_lowercase();
+            let image = image.trim_end_matches(".exe");
+            return !want.is_empty() && image == want;
         }
         false
     }
@@ -88,7 +102,7 @@ fn pid_alive(pid: u32) -> bool {
 }
 
 /// 查询项目当前是否处于监听中（供 CLI check-watch）。
-/// 状态文件存在且 PID 存活 => true；文件存在但 PID 已死 => 清理后 false。
+/// 状态文件存在且 PID 存活且映像名为本工具 => true；否则清理状态文件后 false。
 pub fn is_watching(bgd_root: &Path) -> bool {
     let path = watch_state_path(bgd_root);
     let Ok(text) = fs::read_to_string(&path) else {

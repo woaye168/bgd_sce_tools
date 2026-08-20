@@ -68,7 +68,7 @@ pub async fn start_self_update_async(
     on_progress: impl Fn(u64, Option<u64>) + Send,
 ) -> Result<()> {
     let client = crate::net::async_http_client(proxy, token)?;
-    let release_url = format!("https://api.github.com/repos/{}/releases/latest", env!("CARGO_PKG_NAME"));
+    let release_url = format!("https://api.github.com/repos/{SELF_REPO}/releases/latest");
     let resp = client
         .get(&release_url)
         .send()
