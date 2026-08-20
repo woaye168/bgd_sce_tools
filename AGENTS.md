@@ -56,7 +56,7 @@ bgd_sce_tools setting set <键> <值>                  # 写入应用设置
 **新增或修改任何构建/项目功能时，必须同步完成四件事，缺一不可：**
 1. 修改核心逻辑（`builder.rs` / `project.rs` / `config.rs`）
 2. 同步修改 `cli.rs`（暴露/调整对应子命令）
-3. 用 CLI 在真实项目（如 `D:\sce_online\Res\maps\bgd_glzy`）上验证通过后，才允许提交
+3. 用 CLI 在真实项目上验证通过后，才允许提交；标准验证项目为 `D:/sce_online/Res/maps/bgd_sce_veri`（专用空白项目，有 git 存档，只要不提交即可随时还原）
 4. 同步检查并更新 `README.md` 与 `AGENTS.md`（如适用）；功能改动与对应文档更新必须在同一次提交中完成，不允许“先改功能后补文档”
 
 ## 代码结构
