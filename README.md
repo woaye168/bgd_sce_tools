@@ -72,6 +72,7 @@ Token 仅存于本机 Windows 凭据管理器（条目 `bgd_sce_tools/github_tok
 | 项目 | 选择/切换项目、最近项目列表、初始化新项目、显示框架版本 |
 | 构建 | 全量构建、清除构建、清理日志，实时构建输出 |
 | 监听 | 监听开关，文件变更事件流实时显示 |
+| 应用 | 应用市场（安装/升级/卸载，可展开版本说明）、已安装应用（打开/静默自启） |
 | 设置 | 通用设置（代理 / GitHub Token）、框架设置（更新）、`bgd.json` 构建路径配置 |
 | 关于 | 版本信息、检查更新（自动下载安装） |
 
@@ -86,13 +87,16 @@ Token 仅存于本机 Windows 凭据管理器（条目 `bgd_sce_tools/github_tok
 │   ├── App.tsx                 # 布局与主题
 │   ├── lib/{api.ts, types.ts}  # Tauri 命令封装与类型
 │   ├── components/             # Sidebar / LogPanel / Card
-│   └── pages/                  # 项目/构建/监听/设置/关于 五个页面
+│   └── pages/                  # 项目/构建/监听/应用/设置/关于 六个页面
 ├── src-tauri/                  # 后端（Rust）
-│   ├── src/main.rs             # 二进制入口
+│   ├── src/main.rs             # 二进制入口（CLI 分发 + GUI 启动）
+│   ├── src/cli.rs              # CLI 子命令
 │   ├── src/lib.rs              # Tauri 命令注册与应用状态
 │   ├── src/builder.rs          # 构建核心（全量/增量/清理/监听/API聚合生成）
 │   ├── src/project.rs          # 初始化/框架下载更新/最近项目/应用设置
 │   ├── src/config.rs           # bgd.json 读写
+│   ├── src/apps.rs             # 应用市场（清单/安装/卸载/静默自启/联动停止）
+│   ├── src/secret.rs           # 敏感凭证存储（GitHub Token 存 Windows 凭据管理器）
 │   ├── src/net.rs              # 统一 HTTP 客户端（代理 + GitHub Token 认证）
 │   ├── src/updater.rs          # 自我更新（私有仓库：认证查 Release + 下载安装包）
 │   ├── tauri.conf.json         # 应用配置
@@ -132,13 +136,17 @@ exe 命中子命令即以控制台模式执行（否则启动 GUI），可用于
 
 ```bash
 bgd_sce_tools build --project <项目路径> [--log .bgd/log/build.log]   # 全量构建
+bgd_sce_tools watch --project <项目路径> [--log .bgd/log/watch.log]   # 监听更新（前台阻塞，Ctrl+C 停止）
 bgd_sce_tools clean --project <项目路径>             # 清除构建（还原入口原文）
 bgd_sce_tools clean-logs --project <项目路径>        # 清理日志
 bgd_sce_tools init --project <路径> [--force]        # 初始化项目
 bgd_sce_tools update-framework --project <路径>      # 增量更新框架
 bgd_sce_tools check-framework --project <路径>       # 检查框架更新
 bgd_sce_tools check-watch --project <项目路径>       # 判断是否监听中
+bgd_sce_tools config get <键> --project <项目路径>   # 读取 bgd 配置（合并后生效值）
+bgd_sce_tools config set <键> <值> --project <路径>  # 写入 bgd.json 覆盖项
 bgd_sce_tools setting set github_token <PAT>         # 写入 GitHub Token（私有仓库必需）
+bgd_sce_tools app <应用id> --project <项目路径>      # 启动已安装应用（透传 --project-path）
 # 可选参数：--repo owner/repo  --proxy http://127.0.0.1:7897  --log <日志路径>
 ```
 
@@ -150,40 +158,25 @@ bgd_sce_tools setting set github_token <PAT>         # 写入 GitHub Token（私
 
 fork 本仓库（及 [bgd_sce_framework](https://github.com/woaye168/bgd_sce_framework)）后，需要修改以下位置才能完整使用：
 
-**1. 更新器端点（`src-tauri/tauri.conf.json`）**
+**1. 自我更新仓库（`src-tauri/src/updater.rs`）**
 
-```json
-"plugins": {
-  "updater": {
-    "endpoints": ["https://github.com/你的用户名/bgd_sce_tools/releases/latest/download/latest.json"],
-    "pubkey": "你的更新公钥（见第 2 步）"
-  }
-}
+自我更新为自建逻辑（不依赖 tauri updater 插件，无签名密钥），fork 只需改 `SELF_REPO` 常量：
+
+```rust
+const SELF_REPO: &str = "你的用户名/bgd_sce_tools";
 ```
 
-**2. 生成你自己的更新签名密钥对**
-
-```bash
-npx @tauri-apps/cli@2 signer generate -w updater.key -p 你的密码
-```
-
-- 公钥（`.pub` 文件内容）→ 填入 `tauri.conf.json` 的 `pubkey`
-- 私钥 → 到你的 fork 仓库 **Settings → Secrets and variables → Actions** 添加：
-  - `TAURI_SIGNING_PRIVATE_KEY` = 私钥文件内容
-  - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` = 私钥密码
-- **私钥不要提交到仓库！** 丢失私钥或密码将无法再签发更新包。
-
-**3. 框架仓库地址（`src-tauri/src/project.rs`）**
+**2. 框架仓库地址（`src-tauri/src/project.rs`）**
 
 ```rust
 const DEFAULT_FRAMEWORK_REPO: &str = "你的用户名/bgd_sce_framework";
 ```
 
-**4. 应用标识（可选）**
+**3. 应用标识（可选）**
 
 `tauri.conf.json` 的 `identifier`（`com.bgd.sce-tools`）建议改成你自己的域名形式，避免与上游应用的配置目录冲突。
 
-**5. 游戏项目侧**
+**4. 游戏项目侧**
 
 已初始化的项目，其 `.bgd/bgd.json` 的 `framework_repo` 字段改为你的框架 fork。
 

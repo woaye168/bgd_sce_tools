@@ -44,10 +44,11 @@ bgd_sce_tools check-watch --project <项目路径>       # 判断是否监听中
 bgd_sce_tools config get <键> --project <项目路径>   # 读取 bgd 配置（合并后生效值）
 bgd_sce_tools config set <键> <值> --project <路径>  # 写入 bgd.json 覆盖项
 bgd_sce_tools setting get <键>                       # 读取应用设置（proxy / watch_enabled / github_token / auto_start_apps）
-bgd_sce_tools setting set <键> <值>                  # 写入应用设置
+bgd_sce_tools setting set <键> <值>                  # 写入应用设置（同上四键；save_log 为 GUI 独有，CLI 不支持）
+bgd_sce_tools app <应用id> [--project <路径>]        # 启动已安装应用 EXE（透传 --project-path）
 ```
 
-`--log <路径>` 会把过程日志同时写入文件（无 GUI 环境查看结果）；`check-watch` 通过项目 `.bgd/.watch_state.json` + PID 校验判断监听状态（该文件由 GUI 监听开关维护，已加入框架 .gitignore）；`config`/`setting` 子命令分别读写项目 bgd.json 覆盖项与应用设置，供 CLI 和自动化脚本使用。
+`--log <路径>` 会把过程日志同时写入文件（无 GUI 环境查看结果）；`check-watch` 通过项目 `.bgd/.watch_state.json` + PID 与映像名校验判断监听状态（该文件由 GUI 监听开关与 CLI watch 共同维护，已加入框架 .gitignore）；`config`/`setting` 子命令分别读写项目 bgd.json 覆盖项与应用设置，供 CLI 和自动化脚本使用。
 
 开发期等价命令：`cargo run -- build --project ...`（在 src-tauri/ 下）。
 
@@ -74,6 +75,7 @@ src-tauri/src/
   project.rs                # 初始化(含锁)/框架下载/三路哈希增量更新/最近项目/应用设置
   config.rs                 # bgd.json overlay 读写（bgd_default.json 基底 + bgd.json 覆盖）
   apps.rs                   # 应用市场：registry 拉取/安装/卸载/静默自启/停止应用
+  secret.rs                 # 敏感凭证存储（github_token 存 Windows 凭据管理器）
 ```
 
 ## 关键机制（改代码前必读）
@@ -88,7 +90,7 @@ src-tauri/src/
 - **配置 overlay**：`libs/bgd_default.json`（框架下发）逐 key 被 `.bgd/bgd.json`（项目覆盖）覆盖；保存只写差异。
 - **三路哈希增量更新**：基准存 `.bgd/.framework_state.json`；冲突时本地保留 + 新版另存 `.framework-new`。文本文件统一 LF 后哈希（防 CRLF 误报）。
 - **监听去重**：同一文件 300ms 窗口聚合一次处理（防编辑器原子保存产生重复日志）。
-- **应用市场**：安装即覆盖写入 `apps/<id>/`；升级按钮由前端对比 registry 与本地 app.json 版本号驱动，走 `install_app` 覆盖（升级前自动停止运行中实例：先 `--quit` 优雅退出、兜底 taskkill；装完按自启配置重启）。启动应用透传 `--project-path <当前项目>`。**清单读取链（R5）**：registry（[bgd_sce_appsdk](https://github.com/woaye168/bgd_sce_appsdk)，极简条目 id/name/repo）→ 各应用仓库 `releases/latest` 的 `app-release.json` asset 补全版本/描述/作者/asset名/版本说明（CI 合成；升级按钮展示版本说明；发版不再改 registry）。**静默自启**：勾选写入设置 `auto_start_apps`；默认值由 `default_auto_start` 下发（app-release.json 提供；用户本机勾选/取消优先，取消记入 `auto_start_disabled` 不再播种）；宿主启动时后台线程异步拉起（不阻塞首屏；进程列表一次查询内存匹配；子进程一律 CREATE_NO_WINDOW；透传 `--background` 由应用决定是否无窗口驻留）。**宿主联动**：退出时对所有运行中的已安装应用广播 `--quit`（兜底 taskkill）；切换项目时对静默自启应用执行 `<exe> notify project_path=<路径>` 解耦通知（应用自治处理）。
+- **应用市场**：安装即覆盖写入 `apps/<id>/`（应用 id 仅允许字母/数字/下划线/连字符，安装/卸载/启动前校验，杜绝路径穿越）；升级按钮由前端对比 app-release.json 补全后的 registry version 与本地 app.json 版本号驱动，走 `install_app` 覆盖（升级前自动停止运行中实例：先 `--quit` 优雅退出、兜底 taskkill；装完按自启配置重启）。启动应用透传 `--project-path <当前项目>`。**清单读取链（R5）**：registry（[bgd_sce_appsdk](https://github.com/woaye168/bgd_sce_appsdk)，极简条目 id/name/repo）→ 各应用仓库 `releases/latest` 的 `app-release.json` asset 补全版本/描述/作者/asset名/版本说明（CI 合成；升级按钮展示版本说明；发版不再改 registry）。**静默自启**：勾选写入设置 `auto_start_apps`；默认值由 `default_auto_start` 下发（app-release.json 提供；用户本机勾选/取消优先，取消记入 `auto_start_disabled` 不再播种）；宿主启动时后台线程异步拉起（不阻塞首屏；进程列表一次查询内存匹配；子进程一律 CREATE_NO_WINDOW；透传 `--background` 由应用决定是否无窗口驻留）。**宿主联动**：退出时对所有运行中的已安装应用广播 `--quit`（兜底 taskkill）；切换项目时对静默自启应用执行 `<exe> notify project_path=<路径>` 解耦通知（应用自治处理）。
 
 ## 测试与验证流程（本地闭环）
 
@@ -106,8 +108,9 @@ src-tauri/src/
 
 ## 发布
 
+版本号**唯一来源是 git tag**：CI（`.github/workflows/release.yml`）构建时把 tag 版本自动注入 `tauri.conf.json` 与 `Cargo.toml`；源码中固定为 `0.0.0-dev` 占位，无需手工同步（AboutPage 版本号取自运行时 `getVersion()`）。
+
 ```bash
-# 版本号三处保持同步：tauri.conf.json / Cargo.toml / package.json（AboutPage 显示常量可选）
 git tag -a vX.Y.Z          # 无需写注解，Release notes 自动生成
 git push origin vX.Y.Z
 ```
@@ -119,4 +122,4 @@ Release notes 由 workflow 用 git log 自动归纳版本间提交（"版本说�
 - 网络：国内环境拉依赖/调 GitHub API 需代理，本机 `http://127.0.0.1:7897`。cargo/npm 命令前记得设 `$env:HTTP_PROXY` / `$env:HTTPS_PROXY`。
 - `pnpm` 在本机沙箱环境不稳定，本地验证前端改用 `npm install` + `node node_modules/typescript/bin/tsc` + `node node_modules/vite/bin/vite.js build`。
 - 终端输出中文会 GBK 乱码，属显示问题，不影响实际写入文件/仓库的内容。
-- 工具链敏感目录（`D:\sce_online\Res\maps\bgd_sce_tools`、`bgd_sce_framework`）在沙箱写白名单外，编译/安装请在 `D:\sce_online\Res\maps\bgd_glzy` 下的临时副本里执行。
+- 编译/写文件可直接在仓库内进行；个别沙箱环境如遇写权限问题，回退到 `D:/sce_online/Res/maps/bgd_glzy` 下的临时副本执行。
