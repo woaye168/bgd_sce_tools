@@ -22,7 +22,7 @@
 - Affected specs: 无既有 spec（首次建立）
 - Affected code: 仅新增 `doc/research/*.md` 与 `doc/requirements/*.md`，不触碰任何源码
 - 主视角仓库：`d:\sce_online\Res\maps\bgd_sce_tools`
-- 辅助视角仓库：`bgd_sce_framework`、`bgd_sce_plugins`（bgd_sce_appsdk）、`sce_app_visual-injector`、`sce_app_editor-patch`
+- 辅助视角仓库：`bgd_sce_framework`、`bgd_sce_appsdk`、`sce_app_visual-injector`、`sce_app_editor-patch`
 
 ## ADDED Requirements
 

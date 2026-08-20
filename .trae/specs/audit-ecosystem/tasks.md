@@ -13,7 +13,7 @@
   - [x] SubTask 2.4: 产出 `doc/research/02-Lua框架评估.md`
 
 - [x] Task 3: 审查应用生态（appsdk + 两个应用）
-  - [x] SubTask 3.1: 阅读 bgd_sce_plugins（bgd_sce_appsdk）src/ 全部模块（app/single_instance/watcher/ui/log/config）+ registry.json，评估 SDK 抽象质量
+  - [x] SubTask 3.1: 阅读 bgd_sce_appsdk src/ 全部模块（app/single_instance/watcher/ui/log/config）+ registry.json，评估 SDK 抽象质量
   - [x] SubTask 3.2: 阅读 sce_app_visual-injector（main.rs / core.rs / 注入规范文档），评估触编注入实现
   - [x] SubTask 3.3: 阅读 sce_app_editor-patch 核心（src/ 各模块、patches/、slots/、csharp/bgd_mcp_bridge 关键文件），评估补丁机制、MCP 桥、截图、安全红线落实
   - [x] SubTask 3.4: 产出 `doc/research/03-应用生态评估.md`
