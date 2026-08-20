@@ -8,7 +8,10 @@ use anyhow::{Context, Result};
 
 /// 构造 reqwest 客户端：可选代理 + 可选 GitHub Token
 pub fn http_client(proxy: &str, token: &str) -> Result<reqwest::blocking::Client> {
-    let mut builder = reqwest::blocking::Client::builder().user_agent("BGD_SCE_TOOLS");
+    let mut builder = reqwest::blocking::Client::builder()
+        .user_agent("BGD_SCE_TOOLS")
+        // 连接超时兜底：代理不可用/网络异常时快速失败，而不是无限挂起
+        .connect_timeout(std::time::Duration::from_secs(15));
     let proxy = proxy.trim();
     if !proxy.is_empty() {
         builder = builder.proxy(reqwest::Proxy::all(proxy).context("代理地址无效")?);
@@ -41,9 +44,9 @@ pub async fn download_bytes_async(
         .header(reqwest::header::ACCEPT, "application/octet-stream")
         .send()
         .await
-        .with_context(|| format!("请求下载失败: {url}"))?;
+        .with_context(|| format!("请求下载失败: {url}（{}）", proxy_desc(proxy)))?;
     if !resp.status().is_success() {
-        return Err(anyhow::anyhow!("下载失败: HTTP {}（{url}）", resp.status()));
+        return Err(anyhow::anyhow!("下载失败: HTTP {}（{}）", resp.status(), proxy_desc(proxy)));
     }
     let total = resp.content_length();
     let mut bytes = Vec::with_capacity(total.unwrap_or(0) as usize);
@@ -74,6 +77,12 @@ pub fn check_magic(bytes: &[u8], magic: &[u8], what: &str) -> Result<()> {
     ))
 }
 
+/// 错误信息中的网络通道描述（排障时一眼分辨代理是否生效）
+fn proxy_desc(proxy: &str) -> String {
+    let p = proxy.trim();
+    if p.is_empty() { "直连，未用代理".to_string() } else { format!("代理 {p}") }
+}
+
 /// 向 Tauri 前端发送下载进度事件的便捷构造（事件名固定三处：
 /// `app-download-progress` / `self-update-progress` / `framework-download-progress`）
 pub fn progress_emitter(
@@ -94,7 +103,10 @@ pub fn progress_emitter(
 
 /// 构造 reqwest 异步客户端（0.7.2 起：网络等待让出线程，消除 GUI 假死感）
 pub fn async_http_client(proxy: &str, token: &str) -> Result<reqwest::Client> {
-    let mut builder = reqwest::Client::builder().user_agent("BGD_SCE_TOOLS");
+    let mut builder = reqwest::Client::builder()
+        .user_agent("BGD_SCE_TOOLS")
+        // 连接超时兜底：代理不可用/网络异常时快速失败，而不是无限挂起在 0 进度
+        .connect_timeout(std::time::Duration::from_secs(15));
     let proxy = proxy.trim();
     if !proxy.is_empty() {
         builder = builder.proxy(reqwest::Proxy::all(proxy).context("代理地址无效")?);

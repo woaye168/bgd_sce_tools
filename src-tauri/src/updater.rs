@@ -94,7 +94,12 @@ pub async fn start_self_update_async(
     let bytes = crate::net::download_bytes_async(&asset_url, proxy, token, on_progress).await?;
     crate::net::check_magic(&bytes, b"MZ", "安装包")?;
 
-    let installer = std::env::temp_dir().join("bgd_sce_tools-update-setup.exe");
+    // 安装包按版本取唯一文件名：避免旧安装器进程占用固定文件名导致「写入安装包失败」
+    let version = release["tag_name"].as_str().unwrap_or("unknown").trim_start_matches('v');
+    let installer = std::env::temp_dir().join(format!("bgd_sce_tools-update-{version}-setup.exe"));
+    if installer.exists() {
+        let _ = std::fs::remove_file(&installer); // 尽力清理旧文件（被占用也不阻塞，直接换新名写）
+    }
     std::fs::write(&installer, &bytes)
         .with_context(|| format!("写入安装包失败: {}", installer.display()))?;
 
