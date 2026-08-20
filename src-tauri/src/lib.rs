@@ -594,22 +594,14 @@ fn get_installed_apps() -> Result<Vec<apps::InstalledApp>, String> {
     apps::list_installed().map_err(|e| e.to_string())
 }
 
-/// 启动应用 EXE（有当前项目则传 --project-path；单开：已在运行不重复拉起）
-/// async：进程枚举（spawn PowerShell ~1s）移到 blocking 线程池，不再卡 UI
+/// 启动应用 EXE（有当前项目则传 --project-path）。
+/// 不做单开拦截：bgd_appsdk 应用自带单实例——第二实例向运行中实例发「唤起窗口」信号后
+/// 自行退出，宿主一律放行由应用去重唤出（静默自启驻留的应用也借此打开界面）。
 #[tauri::command]
-async fn start_app(state: State<'_, AppState>, app_id: String) -> Result<(), String> {
+fn start_app(state: State<AppState>, app_id: String) -> Result<(), String> {
     let app_exe = apps::app_exe_path(&app_id).map_err(|e| e.to_string())?;
     if !app_exe.is_file() {
         return Err(format!("应用 {app_id} 未安装"));
-    }
-    // 单开守卫：已在运行不重复拉起（所有接入 bgd_appsdk 的应用都自带单实例唤起，
-    // 放行由应用自身去重并唤出窗口——不再特例 editor-patch）
-    let exe = app_exe.clone();
-    let running = tauri::async_runtime::spawn_blocking(move || apps::is_app_running(&exe))
-        .await
-        .map_err(|e| e.to_string())?;
-    if running {
-        return Err(format!("应用 {app_id} 已在运行（单开限制）"));
     }
     let mut cmd = std::process::Command::new(&app_exe);
     // 有当前项目则传 --project-path（应用可选实现）
