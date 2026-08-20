@@ -80,7 +80,7 @@ src-tauri/src/
 
 ## 关键机制（改代码前必读）
 
-- **私有仓库认证（GitHub Token）**：四个仓库均为私有，所有 GitHub 请求（api.github.com / codeload / raw.githubusercontent / release asset API）必须走 `net.rs` 的 `http_client(proxy, token)`，token 来自应用设置 `github_token`（fine-grained PAT，Contents 只读）。token 为空时不加头（兼容公开仓库）。**禁止**绕过 net.rs 自建 reqwest 客户端。**token 存储**：持久化在 Windows 凭据管理器（`secret.rs`，keyring/wincred，条目 `bgd_sce_tools/github_token`），不落盘 settings.json；旧版明文配置在 `load_settings` 时自动迁移并 scrub 文件。残余风险：不防同用户针对性进程读取凭据管理器（CredRead）——PAT 必须保持 fine-grained Contents 只读，泄露立即吊销轮换。
+- **私有仓库认证（GitHub Token）**：四个仓库均为私有，所有 GitHub 请求（api.github.com / codeload / raw.githubusercontent / release asset API）必须走 `net.rs` 的 `http_client(proxy, token)`，token 来自应用设置 `github_token`（fine-grained PAT，Contents 只读）。token 为空时不加头（兼容公开仓库）。**禁止**绕过 net.rs 自建 reqwest 客户端。**token 存储**：持久化在 Windows 凭据管理器（`secret.rs`，keyring/wincred，条目 `bgd_sce_tools/github_token`），不落盘 settings.json。残余风险：不防同用户针对性进程读取凭据管理器（CredRead）——PAT 必须保持 fine-grained Contents 只读，泄露立即吊销轮换。
 - **release asset 下载**：私有仓库的 asset 直链（releases/download/...）带 token 也 404，必须走 API：`repos/<repo>/releases/tags/<tag>` 定位 asset → `asset.url` + `Accept: application/octet-stream` 下载（插件安装与自我更新均如此）。
 - **静态 require 改写**：源码写真实路径（`require('src.xxx')`，含裸 `require('src')` / `require('libs')`），构建时引号内前缀改写为运行时根名（`bgd_game_server.` 等）。**禁止**恢复字符串拼接构造 require 路径。
 - **白名单构建**：code set 根下仅 `server/client/common/res/entrance` 进产物；根级文件（init.lua、bgd_default.json、.emmyrc.json、.gitignore、AGENTS.md、doc/）各有专门流程。

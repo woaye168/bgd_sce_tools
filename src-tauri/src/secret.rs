@@ -1,5 +1,5 @@
 //! 敏感凭证存储：GitHub Token 存 Windows 凭据管理器（keyring crate，wincred 后端），
-//! 不再落盘 settings.json。首次读取旧配置时由 project::load_settings 完成迁移并 scrub 文件。
+//! 不落盘 settings.json。
 
 use anyhow::{Context, Result};
 
@@ -31,12 +31,13 @@ pub fn save_github_token(token: &str) -> Result<()> {
 mod tests {
     #[test]
     fn round_trip() {
-        // 防回归：keyring 未启用平台特性时会静默退化为内存 mock（写成功但读不到）
-        let entry = keyring::Entry::new("bgd_sce_tools", "github_token").unwrap();
+        // 防回归：keyring 未启用平台特性时会静默退化为内存 mock（写成功但读不到）。
+        // 注意：必须使用独立测试条目——直接操作生产条目会把用户真实 token 清掉
+        let entry = keyring::Entry::new("bgd_sce_tools_test", "probe").unwrap();
         eprintln!("credential backend: {entry:?}");
-        super::save_github_token("probe_xyz").unwrap();
-        assert_eq!(super::load_github_token(), "probe_xyz");
-        super::save_github_token("").unwrap();
-        assert_eq!(super::load_github_token(), "");
+        entry.set_password("probe_xyz").unwrap();
+        assert_eq!(entry.get_password().unwrap(), "probe_xyz");
+        entry.delete_credential().unwrap();
+        assert!(entry.get_password().is_err());
     }
 }
