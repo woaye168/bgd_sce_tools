@@ -1,6 +1,5 @@
 //! 构建核心：全量构建（白名单）、增量构建、清理（入口还原）、API 聚合生成、
 //! 根 init.lua 渲染、入口合并（分界标记）、emmyrc/gitignore 合并、文件监听
-//! 逻辑与 Python 参考实现（.bgd/tools_py/bgd_build.py）一致。
 
 use crate::config::BgdConfig;
 use anyhow::{Context, Result};
@@ -180,9 +179,7 @@ pub fn rewrite_lua(content: &str, side: &str, cfg: &BgdConfig) -> String {
 }
 
 /// res 资源路径替换：把 'libs/res/<类型>/...' 或 'src/res/<类型>/...' 替换为运行时路径
-/// 规则：sound 去掉 .ogg 扩展名；sprites 前缀 @<ProjectName>
-/// res 资源路径替换：把 'libs/res/<类型>/...' 或 'src/res/<类型>/...' 替换为运行时路径
-/// 规则：各类型固定扩展名 + 资源存在性/格式检查（黄色警告）
+/// 规则：sound 去掉 .ogg 扩展名，sprites 前缀 @<ProjectName>；各类型固定扩展名 + 资源存在性检查（黄色警告）
 fn rewrite_res_paths(content: &str, bgd_root: &Path, _cfg: &BgdConfig, log: &LogFn) -> String {
     let project_name = read_project_name(bgd_root).unwrap_or_else(|_| "unknown".to_string());
     let project_root = bgd_root.parent().unwrap_or(bgd_root);
@@ -478,8 +475,6 @@ fn read_project_name(bgd_root: &Path) -> Result<String> {
         .ok_or_else(|| anyhow::anyhow!("map_settings.json 缺少 ProjectName"))
 }
 
-/// 解析 res 声明文件（`return { key = 'path', ... }`）为 (key, path) 列表
-/// 声明是合法的 Lua 表，这里用轻量解析（不依赖 Lua 解释器）
 // ---------------------------------------------------------------- API 聚合生成
 
 /// 扫描 {libs,src}/{common,server,client}/api/*.lua，重新生成聚合 init.lua
