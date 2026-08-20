@@ -59,9 +59,8 @@ pub fn check_self_update(current: &str, proxy: &str, token: &str) -> Result<Self
     })
 }
 
-/// 下载最新 Release 的 NSIS 安装包并启动（安装器会自动关闭并替换当前进程）
-/// 启动自我更新（async：Release 查询与安装包下载让出线程；
-/// `on_progress(downloaded, total)` 回调下载进度）
+/// 启动自我更新：下载最新 Release 的 NSIS 安装包并启动（安装器会自动关闭并替换当前进程）。
+/// async：Release 查询与安装包下载让出线程；`on_progress(downloaded, total)` 回调下载进度
 pub async fn start_self_update_async(
     proxy: &str,
     token: &str,
@@ -103,12 +102,4 @@ pub async fn start_self_update_async(
         .spawn()
         .with_context(|| format!("启动安装器失败: {}", installer.display()))?;
     Ok(())
-}
-
-pub fn start_self_update(proxy: &str, token: &str) -> Result<()> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| anyhow!("创建运行时失败: {e}"))?;
-    rt.block_on(start_self_update_async(proxy, token, |_, _| {}))
 }

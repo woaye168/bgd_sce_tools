@@ -90,27 +90,9 @@ pub fn app_exe_path(id: &str) -> Result<PathBuf> {
     Ok(app_dir(id)?.join(format!("{id}.exe")))
 }
 
-/// 应用目录是否已存在（区分首次安装与升级覆盖）
-pub fn app_dir_exists(id: &str) -> bool {
-    app_dir(id).map(|d| d.is_dir()).unwrap_or(false)
-}
-
 // ---------------------------------------------------------------- 清单拉取
 
-/// 从远程清单 URL 拉取应用列表
-pub fn fetch_registry(url: &str, proxy: &str, token: &str) -> Result<AppRegistry> {
-    let resp = crate::net::http_client(proxy, token)?
-        .get(url)
-        .send()
-        .with_context(|| format!("请求应用清单失败: {url}"))?;
-    if !resp.status().is_success() {
-        return Err(anyhow!("应用清单请求失败: HTTP {}", resp.status()));
-    }
-    let text = resp.text().context("读取应用清单响应失败")?;
-    serde_json::from_str(&text).with_context(|| format!("解析应用清单失败: {url}"))
-}
-
-/// 异步拉取应用列表（async 版：网络等待让出线程）
+/// 拉取应用列表（async：网络等待让出线程）
 pub async fn fetch_registry_async(url: &str, proxy: &str, token: &str) -> Result<AppRegistry> {
     let resp = crate::net::async_http_client(proxy, token)?
         .get(url)
@@ -124,22 +106,9 @@ pub async fn fetch_registry_async(url: &str, proxy: &str, token: &str) -> Result
     serde_json::from_str(&text).with_context(|| format!("解析应用清单失败: {url}"))
 }
 
+/// 单应用元数据补全（0.7.1 应用页「逐应用异步加载」用；async：网络等待让出线程）。
 /// 用应用仓库的 app-release.json（releases/latest asset）补全清单条目的元数据
 /// （版本/描述/作者/asset名/版本说明/默认自启）。asset 不存在时保留 registry 原值（过渡期兼容）。
-pub fn enrich_registry(registry: &mut AppRegistry, proxy: &str, token: &str) {
-    for app in &mut registry.apps {
-        let _ = enrich_app(app, proxy, token);
-    }
-}
-
-/// 单应用元数据补全（0.7.1 应用页「逐应用异步加载」用）。返回是否成功。
-pub fn enrich_app(app: &mut AppInfo, proxy: &str, token: &str) -> Result<()> {
-    let meta = fetch_release_meta(&app.repo, proxy, token)?;
-    apply_release_meta(app, meta);
-    Ok(())
-}
-
-/// 单应用元数据补全（async 版：网络等待让出线程）
 pub async fn enrich_app_async(app: &mut AppInfo, proxy: &str, token: &str) -> Result<()> {
     let meta = fetch_release_meta_async(&app.repo, proxy, token).await?;
     apply_release_meta(app, meta);
@@ -168,36 +137,6 @@ fn apply_release_meta(app: &mut AppInfo, meta: AppReleaseMeta) {
 }
 
 /// 拉取应用仓库 releases/latest 中的 app-release.json asset（CI 合成发布元数据）
-fn fetch_release_meta(repo: &str, proxy: &str, token: &str) -> Result<AppReleaseMeta> {
-    let client = crate::net::http_client(proxy, token)?;
-    let release_url = format!("https://api.github.com/repos/{repo}/releases/latest");
-    let resp = client
-        .get(&release_url)
-        .send()
-        .with_context(|| format!("查询 Release 失败: {release_url}"))?;
-    if !resp.status().is_success() {
-        return Err(anyhow!("查询 Release 失败: HTTP {}", resp.status()));
-    }
-    let release: serde_json::Value = resp.json().context("解析 Release 响应失败")?;
-    let assets = release["assets"].as_array().cloned().unwrap_or_default();
-    let asset_url = assets
-        .iter()
-        .find(|a| a["name"].as_str() == Some("app-release.json"))
-        .and_then(|a| a["url"].as_str().map(str::to_string))
-        .ok_or_else(|| anyhow!("无 app-release.json asset"))?;
-    let resp = client
-        .get(&asset_url)
-        .header(reqwest::header::ACCEPT, "application/octet-stream")
-        .send()
-        .context("下载 app-release.json 失败")?;
-    if !resp.status().is_success() {
-        return Err(anyhow!("下载 app-release.json 失败: HTTP {}", resp.status()));
-    }
-    let text = resp.text().context("读取 app-release.json 失败")?;
-    serde_json::from_str(&text).context("解析 app-release.json 失败")
-}
-
-/// fetch_release_meta 的 async 版
 async fn fetch_release_meta_async(repo: &str, proxy: &str, token: &str) -> Result<AppReleaseMeta> {
     let client = crate::net::async_http_client(proxy, token)?;
     let release_url = format!("https://api.github.com/repos/{repo}/releases/latest");
@@ -231,17 +170,7 @@ async fn fetch_release_meta_async(repo: &str, proxy: &str, token: &str) -> Resul
 
 // ---------------------------------------------------------------- 安装 / 卸载 / 列表
 
-/// 下载并安装应用 exe 到 <宿主>/apps/{id}/
-/// 流程：API 解析 Release -> 按 asset_name 找 asset -> asset API URL + Accept: octet-stream 下载
-pub fn install_app(app: &AppInfo, proxy: &str, token: &str) -> Result<()> {
-    let dir = app_dir(&app.id)?;
-    fs::create_dir_all(&dir).with_context(|| format!("创建应用目录失败: {}", dir.display()))?;
-
-    let client = crate::net::http_client(proxy, token)?;
-    install_app_with(app, &client, &dir)
-}
-
-/// 安装应用（async 版：Release 查询与 asset 下载让出线程；
+/// 下载并安装应用 exe 到 <宿主>/apps/{id}/（async：Release 查询与 asset 下载让出线程；
 /// `on_progress(downloaded, total)` 回调下载进度供前端显示）
 pub async fn install_app_async(
     app: &AppInfo,
@@ -294,59 +223,6 @@ pub async fn install_app_async(
     Ok(())
 }
 
-fn install_app_with(app: &AppInfo, client: &reqwest::blocking::Client, dir: &std::path::Path) -> Result<()> {
-
-    // 1. 解析 Release（tag 为 "latest" 或为空（极简 registry）时取最新 Release）
-    let release_url = if app.tag.is_empty() || app.tag == "latest" {
-        format!("https://api.github.com/repos/{}/releases/latest", app.repo)
-    } else {
-        format!("https://api.github.com/repos/{}/releases/tags/{}", app.repo, app.tag)
-    };
-    let resp = client
-        .get(&release_url)
-        .send()
-        .with_context(|| format!("查询应用 Release 失败: {release_url}"))?;
-    if !resp.status().is_success() {
-        return Err(anyhow!("查询应用 Release 失败: HTTP {}（{}）", resp.status(), app.repo));
-    }
-    let release: serde_json::Value = resp.json().context("解析 Release 响应失败")?;
-
-    // 2. 按文件名定位 asset（asset["url"] 是 API 地址，带 token 才能下载）
-    let assets = release["assets"].as_array().cloned().unwrap_or_default();
-    let asset_url = assets
-        .iter()
-        .find(|a| a["name"].as_str() == Some(app.asset_name.as_str()))
-        .and_then(|a| a["url"].as_str().map(str::to_string))
-        .ok_or_else(|| anyhow!("Release {} 中找不到 asset: {}", app.tag, app.asset_name))?;
-
-    // 3. 下载 asset（Accept: octet-stream；302 到 CDN 时敏感头自动剥离）
-    let resp = client
-        .get(&asset_url)
-        .header(reqwest::header::ACCEPT, "application/octet-stream")
-        .send()
-        .with_context(|| format!("下载应用失败: {}", app.asset_name))?;
-    if !resp.status().is_success() {
-        return Err(anyhow!("下载应用失败: HTTP {}", resp.status()));
-    }
-    let bytes = resp.bytes().context("读取应用下载内容失败")?;
-
-    let exe_path = app_exe_path(&app.id)?;
-    fs::write(&exe_path, &bytes).with_context(|| format!("写入应用文件失败: {}", exe_path.display()))?;
-
-    // 写元数据 app.json
-    let meta = InstalledApp {
-        id: app.id.clone(),
-        name: app.name.clone(),
-        version: app.version.clone(),
-        description: app.description.clone(),
-        author: app.author.clone(),
-    };
-    let meta_path = dir.join("app.json");
-    fs::write(&meta_path, serde_json::to_string_pretty(&meta)?)
-        .with_context(|| format!("写入应用元数据失败: {}", meta_path.display()))?;
-    Ok(())
-}
-
 /// 卸载应用：删除 <宿主>/apps/{id}/ 整个目录
 pub fn uninstall_app(id: &str) -> Result<()> {
     let dir = app_dir(id)?;
@@ -383,9 +259,9 @@ pub fn list_installed() -> Result<Vec<InstalledApp>> {
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-/// 进程 exe 全路径列表一次性获取（小写、反斜杠归一）。
-/// 启动只调一次（~1s），所有应用的「是否在运行」判断在内存中匹配。
-fn running_exe_paths() -> Vec<String> {
+/// PowerShell 一次性枚举全部进程（ProcessId + ExecutablePath），失败返回空列表。
+/// 单进程时 ConvertTo-Json 输出对象而非数组，统一归一为列表。
+fn query_processes() -> Vec<serde_json::Value> {
     let mut cmd = std::process::Command::new("powershell");
     cmd.args([
         "-NoProfile",
@@ -404,12 +280,18 @@ fn running_exe_paths() -> Vec<String> {
     let Ok(doc) = serde_json::from_str::<serde_json::Value>(&text) else {
         return Vec::new();
     };
-    let list = match &doc {
+    match &doc {
         serde_json::Value::Array(a) => a.clone(),
         serde_json::Value::Object(_) => vec![doc],
-        _ => return Vec::new(),
-    };
-    list.iter()
+        _ => Vec::new(),
+    }
+}
+
+/// 进程 exe 全路径列表一次性获取（小写、反斜杠归一）。
+/// 启动只调一次（~1s），所有应用的「是否在运行」判断在内存中匹配。
+fn running_exe_paths() -> Vec<String> {
+    query_processes()
+        .iter()
         .filter_map(|p| p["ExecutablePath"].as_str().map(|s| s.to_lowercase()))
         .collect()
 }
@@ -428,30 +310,8 @@ pub fn is_app_running(exe: &std::path::Path) -> bool {
 /// 运行中应用的 pid 列表（按 exe 全路径匹配）
 fn app_pids(exe: &std::path::Path) -> Vec<u32> {
     let want = exe.display().to_string().replace('/', "\\").to_lowercase();
-    let mut cmd = std::process::Command::new("powershell");
-    cmd.args([
-        "-NoProfile",
-        "-Command",
-        "Get-CimInstance Win32_Process | Select-Object ProcessId,ExecutablePath | ConvertTo-Json -Compress",
-    ]);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-    let Ok(out) = cmd.output() else {
-        return Vec::new();
-    };
-    let text = String::from_utf8_lossy(&out.stdout);
-    let Ok(doc) = serde_json::from_str::<serde_json::Value>(&text) else {
-        return Vec::new();
-    };
-    let list = match &doc {
-        serde_json::Value::Array(a) => a.clone(),
-        serde_json::Value::Object(_) => vec![doc],
-        _ => return Vec::new(),
-    };
-    list.iter()
+    query_processes()
+        .iter()
         .filter(|p| {
             p["ExecutablePath"]
                 .as_str()

@@ -3,9 +3,6 @@
 export interface BgdConfig {
   project_root: string;
   enable_build_log: boolean;
-  asset_target: string;
-  libs_asset_output_name: string;
-  game_asset_output_name: string;
   server_entrance: string;
   client_entrance: string;
   libs_dir: string;

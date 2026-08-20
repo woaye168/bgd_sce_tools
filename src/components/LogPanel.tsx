@@ -10,22 +10,33 @@ interface LogPanelProps {
 
 /** 实时日志面板：订阅后端 bgd-log 事件，自动滚动到底部 */
 export default function LogPanel({ source, className = "" }: LogPanelProps) {
-  const [lines, setLines] = useState<string[]>([]);
+  const [lines, setLines] = useState<{ id: number; text: string }[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const nextId = useRef(0);
+  const scrollScheduled = useRef(false);
 
   useEffect(() => {
     const unlisten = onLog((event: LogEvent) => {
       if (source && event.source !== source) return;
       const time = new Date().toLocaleTimeString("zh-CN", { hour12: false });
-      setLines((prev) => [...prev.slice(-999), `[${time}] ${event.line}`]);
+      setLines((prev) => [
+        ...prev.slice(-999),
+        { id: ++nextId.current, text: `[${time}] ${event.line}` },
+      ]);
     });
     return () => {
       unlisten.then((fn) => fn());
     };
   }, [source]);
 
+  // 滚动节流：高频日志下每帧最多滚动一次
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (scrollScheduled.current) return;
+    scrollScheduled.current = true;
+    requestAnimationFrame(() => {
+      scrollScheduled.current = false;
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    });
   }, [lines]);
 
   return (
@@ -35,18 +46,18 @@ export default function LogPanel({ source, className = "" }: LogPanelProps) {
       {lines.length === 0 ? (
         <span className="text-slate-500">暂无日志输出</span>
       ) : (
-        lines.map((line, i) => (
+        lines.map((line) => (
           <div
-            key={i}
+            key={line.id}
             className={
-              line.includes("[warn]")
+              line.text.includes("[warn]")
                 ? "text-amber-400"
-                : line.includes("[error]")
+                : line.text.includes("[error]")
                   ? "text-red-400"
                   : undefined
             }
           >
-            {line}
+            {line.text}
           </div>
         ))
       )}

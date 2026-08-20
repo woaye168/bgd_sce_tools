@@ -264,6 +264,9 @@ export default function SettingsPage() {
           {textField("客户端入口", "client_entrance")}
 
         </div>
+        <p className="mt-3 text-xs text-slate-400 dark:text-slate-500">
+          enable_build_log / libs_excludes / game_excludes 请使用 CLI 修改：bgd_sce_tools config set &lt;键&gt; &lt;值&gt; --project &lt;项目路径&gt;
+        </p>
         <button
           onClick={save}
           disabled={busy}

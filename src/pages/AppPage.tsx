@@ -26,6 +26,7 @@ export default function AppPage() {
 
   /** 切换应用「静默自启」（本机记忆优先；取消后 registry 下发默认不再播种） */
   const toggleAutoStart = async (id: string, on: boolean) => {
+    const prev = autoStart;
     const next = on ? [...autoStart, id] : autoStart.filter((x) => x !== id);
     setAutoStart(next);
     try {
@@ -38,6 +39,8 @@ export default function AppPage() {
       });
       setMessage(on ? `✔ 已设置静默自启` : `✔ 已取消静默自启`);
     } catch (e) {
+      // 乐观更新失败回滚
+      setAutoStart(prev);
       setMessage(`✘ 保存静默自启配置失败: ${String(e)}`);
     }
   };

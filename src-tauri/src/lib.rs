@@ -39,15 +39,28 @@ fn emit_log(app: &AppHandle, source: &str, line: &str) {
     );
 }
 
-/// 写日志文件（按天滚动：.bgd/log/build-YYYY-MM-DD.log）
+/// 写日志文件（按天滚动：.bgd/log/build-YYYY-MM-DD.log）。
+/// 句柄按路径缓存复用（每行 open+close 在高频日志下开销明显），跨天/换项目时自动重开。
 fn write_log_file(bgd_root: &Path, line: &str) {
+    use std::io::Write;
+    static LOG_FILE: std::sync::LazyLock<Mutex<Option<(PathBuf, fs::File)>>> =
+        std::sync::LazyLock::new(|| Mutex::new(None));
     let log_dir = bgd_root.join("log");
     let _ = fs::create_dir_all(&log_dir);
     let date = format_date(std::time::SystemTime::now());
     let path = log_dir.join(format!("build-{date}.log"));
-    use std::io::Write;
-    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&path) {
-        let _ = writeln!(f, "{}", line);
+    let Ok(mut guard) = LOG_FILE.lock() else { return };
+    let need_open = !matches!(guard.as_ref(), Some((p, _)) if *p == path);
+    if need_open {
+        *guard = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .ok()
+            .map(|f| (path.clone(), f));
+    }
+    if let Some((_, f)) = guard.as_mut() {
+        let _ = writeln!(f, "{line}");
     }
 }
 
@@ -180,7 +193,9 @@ fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 /// 确保安装目录在用户 PATH 中（首次启动/更新后自检写入，替代不可靠的 NSIS 钩子）
-/// 用 CREATE_NO_WINDOW 隐藏子进程控制台，避免 GUI 应用启动时闪黑窗
+/// 用 CREATE_NO_WINDOW 隐藏子进程控制台，避免 GUI 应用启动时闪黑窗。
+/// 成功后落标记文件（应用配置目录 .path_registered，内容为安装目录），
+/// 后续启动跳过 PowerShell 自检（安装目录变化时标记内容不匹配会自动重检）。
 fn ensure_path_registered() {
     use std::os::windows::process::CommandExt;
     use std::process::Command;
@@ -189,15 +204,27 @@ fn ensure_path_registered() {
     let Ok(exe) = std::env::current_exe() else { return };
     let Some(dir) = exe.parent() else { return };
     let dir_str = dir.to_string_lossy().to_string();
+    let marker = std::env::var("APPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir())
+        .join("com.bgd.sce-tools")
+        .join(".path_registered");
+    if fs::read_to_string(&marker).map(|s| s.trim() == dir_str).unwrap_or(false) {
+        return;
+    }
     // PowerShell：PATH 不含安装目录才追加（幂等）
     let script = format!(
         "$i='{}'; $p=(Get-ItemProperty -Path 'HKCU:\\Environment' -Name Path -ErrorAction SilentlyContinue).Path; if (($p -split ';') -notcontains $i) {{ $n = if ($p) {{ $p + ';' + $i }} else {{ $i }}; Set-ItemProperty -Path 'HKCU:\\Environment' -Name Path -Value $n }}",
         dir_str.replace('\'', "''")
     );
-    let _ = Command::new("powershell")
+    if Command::new("powershell")
         .args(["-NoProfile", "-Command", &script])
         .creation_flags(CREATE_NO_WINDOW)
-        .spawn();
+        .spawn()
+        .is_ok()
+    {
+        let _ = fs::write(&marker, &dir_str);
+    }
 }
 
 fn load_proxy(app: &AppHandle) -> String {
@@ -501,7 +528,7 @@ async fn install_app(app: AppHandle, state: State<'_, AppState>, app_info: apps:
     // 先 --quit 优雅退出（应用支持时），兜底 taskkill；装完若之前在跑则按自启配置重启。
     let was_running = apps::is_app_running(&apps::app_exe_path(&app_info.id).map_err(|e| e.to_string())?);
     if was_running {
-        apps::stop_app(&app_info.id).map_err(|e| format!("停止运行中的 {app_info} 失败: {e}", app_info = app_info.id))?;
+        apps::stop_app(&app_info.id).map_err(|e| format!("停止运行中的 {} 失败: {e}", app_info.id))?;
     }
     // 下载进度回调：向前端发事件（AppPage 显示 已下载/总大小）
     let on_progress = crate::net::progress_emitter(&app, "app-download-progress", Some(app_info.id.clone()));
