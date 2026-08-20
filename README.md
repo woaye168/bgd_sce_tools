@@ -92,7 +92,7 @@ Token 仅存于本机 Windows 凭据管理器（条目 `bgd_sce_tools/github_tok
 │   ├── src/main.rs             # 二进制入口（CLI 分发 + GUI 启动）
 │   ├── src/cli.rs              # CLI 子命令
 │   ├── src/lib.rs              # Tauri 命令注册与应用状态
-│   ├── src/builder.rs          # 构建核心（全量/增量/清理/监听/API聚合生成）
+│   ├── src/builder/            # 构建核心（mod 主流程编排 + merge/rewrite/res/watch 子模块）
 │   ├── src/project.rs          # 初始化/框架下载更新/最近项目/应用设置
 │   ├── src/config.rs           # bgd.json 读写
 │   ├── src/apps.rs             # 应用市场（清单/安装/卸载/静默自启/联动停止）
@@ -200,7 +200,7 @@ git push origin v0.1.4
 
 ## 构建逻辑（与框架的约定）
 
-工具的构建引擎（`src-tauri/src/builder.rs`）实现以下规则，与框架仓库的约定一一对应：
+工具的构建引擎（`src-tauri/src/builder/`）实现以下规则，与框架仓库的约定一一对应：
 
 1. **白名单构建**：code set 根下仅 `server/`、`client/`、`common/`、`res/`、`entrance/` 进产物流程；根级文件（init.lua、bgd_default.json、.emmyrc.json、.gitignore、AGENTS.md、doc/）各有专门流程
 2. **模块名改写**：复制 `.lua` 时，把引号内的 `src.` / `libs.` 前缀改写为运行时根名（`bgd_game_server.` / `bgd_game_client.` / `bgd_libs_server.` / `bgd_libs_client.`，取自配置的 target 目录名）；裸 `require('src')` / `require('libs')` 同样改写为对应运行时根
