@@ -202,6 +202,7 @@ fn set_config_field(cfg: &mut BgdConfig, key: &str, value: &str) -> Result<()> {
         "libs_excludes" => cfg.libs_excludes = parse_list(value)?,
         "game_excludes" => cfg.game_excludes = parse_list(value)?,
         "rewrite_excludes" => cfg.rewrite_excludes = parse_list(value)?,
+        "rewrite_skip_annotation" => cfg.rewrite_skip_annotation = value.to_string(),
         "res_rules" => {
             cfg.res_rules = serde_json::from_str(value)
                 .with_context(|| format!("res_rules 需用 JSON 数组格式（对象含 res_type 等字段）: {value}"))?
@@ -337,7 +338,25 @@ pub fn run() -> i32 {
                         cfg.save(&bgd_root)?;
                         logger.log(&format!("已写入 bgd.json: {key} = {value}"));
                     }
-                    other => return Err(anyhow::anyhow!("未知 config 子命令: {other}（get/set）")),
+                    "reset" => {
+                        if key.is_empty() {
+                            return Err(anyhow::anyhow!("config reset 缺少键名"));
+                        }
+                        // 恢复默认 = 把字段设回内建默认值（与默认一致，save 自然不落盘覆盖项）
+                        let defaults = serde_json::to_value(BgdConfig::defaults())?;
+                        let Some(default_val) = defaults.get(&key).cloned() else {
+                            return Err(anyhow::anyhow!("未知配置键: {key}"));
+                        };
+                        let mut cfg = cfg;
+                        let mut cv = serde_json::to_value(&cfg)?;
+                        cv.as_object_mut()
+                            .ok_or_else(|| anyhow::anyhow!("配置序列化异常"))?
+                            .insert(key.clone(), default_val.clone());
+                        cfg = serde_json::from_value(cv).context("配置写回失败")?;
+                        cfg.save(&bgd_root)?;
+                        logger.log(&format!("已恢复默认: {key} = {default_val}"));
+                    }
+                    other => return Err(anyhow::anyhow!("未知 config 子命令: {other}（get/set/reset）")),
                 }
             }
             "setting" => {

@@ -299,6 +299,12 @@ fn get_effective_res_rules(state: State<AppState>) -> Result<Vec<builder::rules:
     Ok(builder::rules::effective_rules(&cfg))
 }
 
+/// 工具内建默认配置（设置界面「恢复默认」按钮用）
+#[tauri::command]
+fn get_config_defaults() -> BgdConfig {
+    BgdConfig::defaults()
+}
+
 // ---------------------------------------------------------------- 构建命令
 
 #[tauri::command]
@@ -705,6 +711,7 @@ pub fn run() {
             get_project_info,
             get_config,
             save_config,
+            get_config_defaults,
             get_effective_res_rules,
             full_build,
             clean_build,

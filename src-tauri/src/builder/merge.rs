@@ -1,7 +1,7 @@
 //! 生成与合并：API 聚合生成、根 init.lua 渲染、入口合并（分界标记）、
 //! emmyrc/gitignore 合并、AGENTS.md 同步
 
-use super::rewrite::rewrite_lua;
+use super::rewrite;
 use super::{code_set_dir, LogFn};
 use crate::config::BgdConfig;
 use anyhow::Result;
@@ -128,9 +128,13 @@ pub fn update_entrance(kind: &str, bgd_root: &Path, cfg: &BgdConfig, log: &LogFn
     };
     let dest = cfg.abs(bgd_root, dest_rel);
 
-    // entrance 内容同样要走模块名改写（引号内 libs./src. 前缀 -> 运行时根名）
-    let libs_content = rewrite_lua(&fs::read_to_string(&libs_entrance).unwrap_or_default(), kind, cfg);
-    let game_content = rewrite_lua(&fs::read_to_string(&game_entrance).unwrap_or_default(), kind, cfg);
+    // entrance 内容同样要走模块名改写（引号内 libs./src. 前缀 -> 运行时根名）；
+    // 行级注解跳过（rewrite_skip_annotation）在 entrance 管线同样生效
+    let annotation = &cfg.rewrite_skip_annotation;
+    let libs_raw = fs::read_to_string(&libs_entrance).unwrap_or_default();
+    let game_raw = fs::read_to_string(&game_entrance).unwrap_or_default();
+    let libs_content = rewrite::rewrite_lua(&libs_raw, kind, cfg, &rewrite::skip_ranges(&libs_raw, annotation));
+    let game_content = rewrite::rewrite_lua(&game_raw, kind, cfg, &rewrite::skip_ranges(&game_raw, annotation));
 
     // 提取原文：含标记取标记之前；不含标记则整个现有文件视为原文（首次接入）。
     // 防御：若"原文"自身仍含标记（历史脏数据导致标记堆积），视为损坏，丢弃原文，

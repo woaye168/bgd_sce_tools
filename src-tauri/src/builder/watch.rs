@@ -5,8 +5,8 @@ use super::merge::{
     update_entrance,
 };
 use super::{
-    build_one_file, code_set_dir, dest_for, ext_of, in_whitelist, is_excluded, rel_of, sides_for,
-    LogFn,
+    build_one_file, code_set_dir, dest_for, ext_of, in_whitelist, is_excluded, project_rel, rel_of,
+    res, rules, sides_for, LogFn,
 };
 use crate::config::BgdConfig;
 use anyhow::Result;
@@ -132,7 +132,17 @@ fn delete_outputs(path: &Path, bgd_root: &Path, cfg: &BgdConfig, log: &LogFn) ->
         return Ok(());
     }
     let (_, excludes) = code_set_dir(code_set, cfg);
-    if is_excluded(&rel, excludes) {
+    if is_excluded(&project_rel(code_set, &rel, cfg), excludes) {
+        return Ok(());
+    }
+    // res 资源：落位在规则 disk_prefix 目录（不在产物 target 目录），按规则定位删除
+    if rel.starts_with("/res/") {
+        if let Some(disk) = res::res_disk_path(bgd_root, cfg, code_set, &rel) {
+            if disk.exists() {
+                fs::remove_file(&disk)?;
+                log(&format!("[deleted] res: [{code_set}] {rel}"));
+            }
+        }
         return Ok(());
     }
     for side in sides_for(&rel) {
@@ -147,6 +157,36 @@ fn delete_outputs(path: &Path, bgd_root: &Path, cfg: &BgdConfig, log: &LogFn) ->
         }
     }
     Ok(())
+}
+
+/// 配置热更新（0.9.1）：轮询 bgd.json mtime，变化即重读替换监听持有的配置快照。
+/// 返回是否发生了重载。配置变更后补调 write_path_rules（盖戳与 res_rules 同步，内容一致防抖）。
+fn maybe_reload_cfg(
+    cfg: &mut BgdConfig,
+    mtime: &mut Option<std::time::SystemTime>,
+    bgd_root: &Path,
+    log: &LogFn,
+) -> bool {
+    let path = bgd_root.join("bgd.json");
+    let cur = fs::metadata(&path).and_then(|m| m.modified()).ok();
+    if cur == *mtime {
+        return false;
+    }
+    *mtime = cur;
+    match BgdConfig::load(bgd_root) {
+        Ok(new_cfg) => {
+            *cfg = new_cfg;
+            log("[watch] 检测到 bgd.json 变更，已热更新配置（历史产物不追溯，全量构建后完全生效）");
+            if let Err(e) = rules::write_path_rules(bgd_root, cfg, log) {
+                log(&format!("[warn] path_rules 盖戳刷新失败: {e}"));
+            }
+            true
+        }
+        Err(e) => {
+            log(&format!("[warn] bgd.json 变更但解析失败，沿用旧配置: {e}"));
+            false
+        }
+    }
 }
 
 /// 监听单文件路由：白名单文件增量构建；根级元文件走专门流程
@@ -245,23 +285,35 @@ where
     std::thread::spawn(move || {
         // path -> (deleted, last_seen)
         let mut pending: HashMap<PathBuf, (bool, Instant)> = HashMap::new();
+        // 配置快照（bgd.json 变更时热更新；0.9.1 前监听全程持有启动时快照导致配置改动不生效）
+        let mut cfg_live = cfg_cb;
+        let mut cfg_mtime = fs::metadata(bgd_cb.join("bgd.json"))
+            .and_then(|m| m.modified())
+            .ok();
         // 处理已静默超过窗口的文件（每次收事件也顺带调用，防事件持续流入时永不超时、到期项积压）
-        let process_ready = |pending: &mut HashMap<PathBuf, (bool, Instant)>| {
+        fn process_ready(
+            pending: &mut HashMap<PathBuf, (bool, Instant)>,
+            bgd_root: &Path,
+            cfg: &BgdConfig,
+            log: &LogFn,
+        ) {
             let now = Instant::now();
             let ready: Vec<PathBuf> = pending
                 .iter()
                 .filter(|(_, (_, t))| now.duration_since(*t) >= Duration::from_millis(DEBOUNCE_MS))
                 .map(|(p, _)| p.clone())
                 .collect();
-            let log_line = |s: &str| (log_cb)(s);
             for path in ready {
                 let (deleted, _) = pending.remove(&path).unwrap_or((false, now));
                 // 最终状态以文件实际存在性为准（避免误删）
                 let actually_deleted = deleted && !path.exists();
-                handle_file(&path, actually_deleted, &bgd_cb, &cfg_cb, &log_line);
+                handle_file(&path, actually_deleted, bgd_root, cfg, log);
             }
-        };
+        }
+        let log_line = |s: &str| (log_cb)(s);
         loop {
+            // 每轮检查配置变更（事件驱动与超时轮询都经过这里，最迟 300ms 生效）
+            maybe_reload_cfg(&mut cfg_live, &mut cfg_mtime, &bgd_cb, &log_line);
             match rx.recv_timeout(Duration::from_millis(DEBOUNCE_MS)) {
                 Ok(event) => {
                     for path in event.paths {
@@ -277,9 +329,11 @@ where
                             })
                             .or_insert((deleted, Instant::now()));
                     }
-                    process_ready(&mut pending);
+                    process_ready(&mut pending, &bgd_cb, &cfg_live, &log_line);
                 }
-                Err(mpsc::RecvTimeoutError::Timeout) => process_ready(&mut pending),
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    process_ready(&mut pending, &bgd_cb, &cfg_live, &log_line)
+                }
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
         }

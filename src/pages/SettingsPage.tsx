@@ -7,6 +7,7 @@ import Card from "../components/Card";
 /** 设置页：通用设置（代理）、项目配置（bgd.json 表单）、框架更新 */
 export default function SettingsPage() {
   const [config, setConfig] = useState<BgdConfig | null>(null);
+  const [defaults, setDefaults] = useState<BgdConfig | null>(null);
   const [appSettings, setAppSettings] = useState<AppSettings>({ proxy: "", watch_enabled: false, save_log: false, github_token: "", auto_start_apps: [], auto_start_disabled: [] });
   const [resRules, setResRules] = useState<ResRule[]>([]);
   const [updateInfo, setUpdateInfo] = useState<FrameworkUpdateInfo | null>(null);
@@ -19,6 +20,7 @@ export default function SettingsPage() {
   // 必须有依赖数组 []：无依赖时每次渲染都会重新拉取并用存档值覆盖输入框，导致无法正常输入
   useEffect(() => {
     api.getConfig().then(setConfig).catch(() => setConfig(null));
+    api.getConfigDefaults().then(setDefaults).catch(() => {});
     api.getAppSettings().then(setAppSettings).catch(() => {});
     api.getEffectiveResRules().then(setResRules).catch(() => {});
   }, []);
@@ -98,6 +100,21 @@ export default function SettingsPage() {
     }
   };
 
+  /** 恢复默认按钮（当前值与内建默认不同时显示；点击设回默认值，保存时自然不落盘覆盖项） */
+  const resetButton = (key: keyof BgdConfig) => {
+    if (!config || !defaults) return null;
+    if (JSON.stringify(config[key]) === JSON.stringify(defaults[key])) return null;
+    return (
+      <button
+        onClick={() => set(key, defaults[key] as string & boolean & string[])}
+        className="ml-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+        title={`恢复默认：${JSON.stringify(defaults[key])}`}
+      >
+        恢复默认
+      </button>
+    );
+  };
+
   const textField = (
     label: string,
     key: keyof BgdConfig,
@@ -108,6 +125,7 @@ export default function SettingsPage() {
       <label className="block">
         <span className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">
           {label}
+          {resetButton(key)}
           {hint && <span className="ml-2 text-slate-400">{hint}</span>}
         </span>
         <input
@@ -255,6 +273,9 @@ export default function SettingsPage() {
       </Card>
 
       <Card title="构建路径配置（bgd.json）">
+        <p className="mb-3 text-xs text-slate-400 dark:text-slate-500">
+          本卡片所有路径统一相对项目根目录（如 .bgd/libs、script/bgd_libs_server）
+        </p>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {textField("框架源码目录", "libs_dir")}
           {textField("游戏源码目录", "game_dir")}
@@ -264,16 +285,18 @@ export default function SettingsPage() {
           {textField("游戏客户端产物", "game_client_target")}
           {textField("服务端入口", "server_entrance")}
           {textField("客户端入口", "client_entrance")}
-
+          {textField("行级跳过注解", "rewrite_skip_annotation", "某行含此文本时其下一行跳过全部替换（留空禁用）")}
         </div>
 
         {/* 替换排除（rewrite_excludes）：正常进构建产物但跳过模块名/res 路径替换；一行一条 */}
         <label className="mt-4 block">
           <span className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">
             替换排除（rewrite_excludes）
+            {resetButton("rewrite_excludes")}
             <span className="ml-2 text-slate-400">
-              指定文件名/目录名（相对源码根，如 client/path_rules.lua），一行一条；
-              命中的文件正常进产物但跳过模块名/res 路径替换（工具自产盖戳文件自动并入，无需在此配置）
+              相对项目根的完整路径（不含扩展名），命中文件或整个目录；单行内可用 | 分隔多个，一行一条。
+              命中的文件正常进产物但跳过模块名/res 路径替换。
+              默认含 .bgd/src/client/path_rules（工具自产盖戳保护——删除该项后盖戳会被替换损坏！）
             </span>
           </span>
           <textarea
@@ -360,8 +383,8 @@ export default function SettingsPage() {
           </div>
         </div>
         <p className="mt-3 text-xs text-slate-400 dark:text-slate-500">
-          enable_build_log / libs_excludes / game_excludes / rewrite_excludes / res_rules 也可用 CLI：
-          bgd_sce_tools config set &lt;键&gt; &lt;值&gt; --project &lt;项目路径&gt;（数组用 JSON 数组形式）
+          enable_build_log / libs_excludes / game_excludes / rewrite_excludes / rewrite_skip_annotation / res_rules 也可用 CLI：
+          bgd_sce_tools config set &lt;键&gt; &lt;值&gt; --project &lt;项目路径&gt;（数组用 JSON 数组形式）；config reset &lt;键&gt; 恢复默认
         </p>
         <button
           onClick={save}

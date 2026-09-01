@@ -119,6 +119,24 @@ pub fn prefix_for(code_set: &str, cfg: &BgdConfig) -> String {
         .into_owned()
 }
 
+/// 源码引用前缀（require('libs.x') / 'libs/res/...' 的 libs 段）：cfg.libs_dir 目录名
+pub fn libs_prefix(cfg: &BgdConfig) -> String {
+    Path::new(&cfg.libs_dir)
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// 源码引用前缀（require('src.x') / 'src/res/...' 的 src 段）：cfg.game_dir 目录名
+pub fn src_prefix(cfg: &BgdConfig) -> String {
+    Path::new(&cfg.game_dir)
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned()
+}
+
 /// 从 map_settings.json 读取 ProjectName（sprites 引用前缀与地图包名用）
 pub fn project_name(bgd_root: &Path) -> Result<String> {
     let project_root = bgd_root.parent().unwrap_or(bgd_root);
@@ -130,6 +148,19 @@ pub fn project_name(bgd_root: &Path) -> Result<String> {
         .as_str()
         .map(|s| s.to_string())
         .ok_or_else(|| anyhow::anyhow!("map_settings.json 缺少 ProjectName"))
+}
+
+/// project_name 的缓存版（F4：每文件现读 map_settings.json 是 0.9.0 性能债）。
+/// 地图名在构建期不变，按 bgd_root 缓存进程级。
+pub fn project_name_cached(bgd_root: &Path) -> String {
+    static CACHE: std::sync::LazyLock<
+        std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, String>>,
+    > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    let mut guard = CACHE.lock().unwrap();
+    guard
+        .entry(bgd_root.to_path_buf())
+        .or_insert_with(|| project_name(bgd_root).unwrap_or_else(|_| "unknown".to_string()))
+        .clone()
 }
 
 /// 解析规则占位符：{prefix} = code set 前缀，{project} = ProjectName
@@ -144,26 +175,21 @@ pub fn resolve_template(template: &str, code_set: &str, cfg: &BgdConfig, project
 // ---------------------------------------------------------------------------
 
 /// 盖戳文件相对路径（相对游戏源码目录 src/）。
-/// 本文件内容为运行时终值，构建替换会损坏它——构建编排层把它并入
-/// rewrite_excludes 生效集保护（见 effective_rewrite_excludes）。
+/// 本文件内容为运行时终值，构建替换会损坏它——默认由 rewrite_excludes 内建默认项
+/// `.bgd/src/client/path_rules` 保护（可见、可在设置中删除，删除即失去保护）。
 pub const PATH_RULES_REL: &str = "client/path_rules.lua";
-
-/// 生效的替换排除集 = 用户配置（bgd.json rewrite_excludes）+ 工具自产 artifact
-pub fn effective_rewrite_excludes(cfg: &BgdConfig) -> Vec<String> {
-    let mut v = cfg.rewrite_excludes.clone();
-    v.push(PATH_RULES_REL.to_string());
-    v
-}
 
 /// 渲染 path_rules.lua 内容（全部为解析后的原样终值，消费端只做前缀替换）
 pub fn render_path_rules_lua(bgd_root: &Path, cfg: &BgdConfig) -> Result<String> {
-    let project = project_name(bgd_root).unwrap_or_else(|_| "unknown".to_string());
+    let project = project_name_cached(bgd_root);
     let libs_root = prefix_for("libs", cfg);
     let game_root = prefix_for("game", cfg);
+    let libs_p = libs_prefix(cfg);
+    let src_p = src_prefix(cfg);
 
     let mut res_lines = String::new();
     for rule in effective_rules(cfg) {
-        for code_set in ["libs", "src"] {
+        for (code_set, prefix) in [("libs", &libs_p), ("game", &src_p)] {
             let to = resolve_template(&rule.runtime_prefix, code_set, cfg, &project);
             let strip = if rule.strip_ext_in_ref && !rule.expect_ext.is_empty() {
                 format!(", strip_ext = '{}'", rule.expect_ext)
@@ -171,7 +197,7 @@ pub fn render_path_rules_lua(bgd_root: &Path, cfg: &BgdConfig) -> Result<String>
                 String::new()
             };
             res_lines.push_str(&format!(
-                "        {{ from = '{code_set}/res/{ty}/', to = '{to}'{strip} }},\n",
+                "        {{ from = '{prefix}/res/{ty}/', to = '{to}'{strip} }},\n",
                 ty = rule.res_type
             ));
         }
@@ -190,7 +216,8 @@ pub fn render_path_rules_lua(bgd_root: &Path, cfg: &BgdConfig) -> Result<String>
 --   bgd_sce_tools build 时生成。规则在工具「设置-构建路径配置」查看/编辑
 --  （默认值内建于 tools；项目级覆盖写在 .bgd/bgd.json 的 res_rules）。
 --   工具改规则 → 下次 build 自动重新盖戳 → 即刻生效，无第二处需要同步。
---   本文件经 rewrite_excludes 保护：内容已是运行时终值，构建替换会损坏它。
+--   本文件经 rewrite_excludes 内建默认项（.bgd/src/client/path_rules）保护：
+--   内容已是运行时终值，构建替换会损坏它（该默认项在设置中可见、可删，删即失去保护）。
 --
 -- 怎么加载的（时序）：
 --   .bgd/libs/entrance/client.lua（框架入口）顶部 pcall require
@@ -208,10 +235,10 @@ _G.bgd_path_rules = {{
     -- require 模块名前缀对照（点形式，key 源码前缀 → value 包内根名；
     -- 消费端组合 '@'..map..'.'..value..其余段——'@' 是引擎跨包标记，eval 环境不可省）
     modules = {{
-        ['libs.'] = '{libs_root}.',
-        ['src.']  = '{game_root}.',
-        ['libs']  = '{libs_root}',
-        ['src']   = '{game_root}',
+        ['{libs_p}.'] = '{libs_root}.',
+        ['{src_p}.']  = '{game_root}.',
+        ['{libs_p}']  = '{libs_root}',
+        ['{src_p}']   = '{game_root}',
     }},
     -- res 资源字面量前缀对照（斜杠形式，按序首个前缀命中；strip_ext = 引用去扩展名）
     res = {{

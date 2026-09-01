@@ -14,6 +14,8 @@ fn attach_parent_console() {
 }
 
 fn main() {
+    // 释放内建默认配置到 exe 旁（可见性用途；CLI/GUI 两条路径都经过这里）
+    bgd_sce_tools_lib::config::release_embedded_defaults();
     // 命中 CLI 子命令则以控制台模式执行；否则启动 GUI
     if cli::is_cli_invocation() {
         #[cfg(windows)]

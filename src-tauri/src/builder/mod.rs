@@ -37,16 +37,44 @@ const BUILD_SUBDIRS: [&str; 4] = ["server", "client", "common", "res"];
 
 // ---------------------------------------------------------------- 排除规则
 
-/// rel 形如 "/server/GameServer.lua"；排除项如 "types"、"client/eg"（目录边界匹配）
-pub fn is_excluded(rel: &str, excludes: &[String]) -> bool {
-    let norm = format!("/{}", rel.trim_start_matches('/').replace('\\', "/"));
-    for excl in excludes {
-        let e = format!("/{}", excl.trim_matches(['/', '\\']).replace('\\', "/"));
-        if norm == e || norm.starts_with(&format!("{e}/")) {
-            return true;
+/// 去掉路径最后一段的扩展名（如 ".bgd/src/client/x.lua" -> ".bgd/src/client/x"）
+fn strip_ext(p: &str) -> &str {
+    let seg_start = p.rfind('/').map(|i| i + 1).unwrap_or(0);
+    match p[seg_start..].rfind('.') {
+        Some(dot) => &p[..seg_start + dot],
+        None => p,
+    }
+}
+
+/// 排除匹配（0.9.1 新语义）：candidate 与条目均为**相对项目根的完整路径**
+/// （如 ".bgd/src/client/path_rules"）。条目不含扩展名，单条内可用 `|` 分隔多个。
+/// 命中：candidate 去扩展名后与条目相等（文件），或 candidate 位于条目目录下（目录）。
+pub fn is_excluded(candidate: &str, excludes: &[String]) -> bool {
+    let cand = candidate.trim_start_matches('/').replace('\\', "/");
+    let cand_noext = strip_ext(&cand);
+    for raw in excludes {
+        for part in raw.split('|') {
+            let e = part.trim().trim_matches(['/', '\\']).replace('\\', "/");
+            if e.is_empty() {
+                continue;
+            }
+            if cand_noext == e || cand.starts_with(&format!("{e}/")) {
+                return true;
+            }
         }
     }
     false
+}
+
+/// code set 相对路径（"/client/x.lua"）→ 相对项目根路径（".bgd/src/client/x.lua"）
+/// ——排除类配置（libs_excludes/game_excludes/rewrite_excludes）统一按项目根完整路径匹配
+fn project_rel(code_set: &str, rel: &str, cfg: &BgdConfig) -> String {
+    let (dir, _) = code_set_dir(code_set, cfg);
+    format!(
+        "{}/{}",
+        dir.trim_matches(['/', '\\']).replace('\\', "/"),
+        rel.trim_start_matches('/')
+    )
 }
 
 fn in_whitelist(rel: &str) -> bool {
@@ -82,8 +110,10 @@ fn transform_and_write(src: &Path, dest: &Path, side: &str, cfg: &BgdConfig, bgd
         let content = fs::read_to_string(src)
             .with_context(|| format!("无法读取源文件: {}", src.display()))?;
         let content = if ext == "lua" && !skip_rewrite {
-            let content = rewrite::rewrite_lua(&content, side, cfg);
-            rewrite::rewrite_res_paths(&content, bgd_root, cfg, log)
+            // 行级注解跳过（rewrite_skip_annotation）：注解行的下一行不替换
+            let skips = rewrite::skip_ranges(&content, &cfg.rewrite_skip_annotation);
+            let content = rewrite::rewrite_lua(&content, side, cfg, &skips);
+            rewrite::rewrite_res_paths(&content, bgd_root, cfg, &skips, log)
         } else if ext == "lua" {
             content
         } else {
@@ -151,7 +181,8 @@ pub fn build_one_file(
         return Ok(0);
     }
     let (_, excludes) = code_set_dir(code_set, cfg);
-    if is_excluded(&rel, excludes) {
+    let proj_rel = project_rel(code_set, &rel, cfg);
+    if is_excluded(&proj_rel, excludes) {
         log(&format!("[skip] excluded: [{code_set}] {rel}"));
         return Ok(0);
     }
@@ -165,7 +196,7 @@ pub fn build_one_file(
     }
 
     // 替换排除（rewrite_excludes）：正常进产物但跳过模块名/res 替换
-    let skip_rewrite = is_excluded(&rel, &rules::effective_rewrite_excludes(cfg));
+    let skip_rewrite = is_excluded(&proj_rel, &cfg.rewrite_excludes);
     if skip_rewrite {
         log(&format!("[ok] rewrite-excluded: [{code_set}] {rel}"));
     }

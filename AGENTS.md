@@ -43,6 +43,7 @@ bgd_sce_tools check-framework --project <路径> [--proxy http://...]
 bgd_sce_tools check-watch --project <项目路径>       # 判断是否监听中
 bgd_sce_tools config get <键> --project <项目路径>   # 读取 bgd 配置（合并后生效值）
 bgd_sce_tools config set <键> <值> --project <路径>  # 写入 bgd.json 覆盖项
+bgd_sce_tools config reset <键> --project <路径>     # 恢复指定配置项为工具内建默认
 bgd_sce_tools setting get <键>                       # 读取应用设置（proxy / watch_enabled / github_token / auto_start_apps）
 bgd_sce_tools setting set <键> <值>                  # 写入应用设置（同上四键；save_log 为 GUI 独有，CLI 不支持）
 bgd_sce_tools app <应用id> [--project <路径>]        # 启动已安装应用 EXE（透传 --project-path）
@@ -71,9 +72,10 @@ src-tauri/src/
   main.rs                   # 二进制入口：CLI 分发 + GUI 启动
   cli.rs                    # CLI 子命令（本文件上方有同步约定）
   lib.rs                    # Tauri 命令注册、AppState、启动恢复
-  builder/                  # 构建核心：mod.rs 主流程编排（白名单构建/增量/清理）+ merge.rs（API聚合/init渲染/入口合并/配置合并）+ rewrite.rs（require/res 路径改写）+ res.rs（资源同步）+ watch.rs（监听去重/状态）
+  builder/                  # 构建核心：mod.rs 主流程编排（白名单构建/增量/清理/排除匹配）+ merge.rs（API聚合/init渲染/入口合并/配置合并）+ rewrite.rs（require/res 路径改写 + 行级注解跳过）+ rules.rs（路径规则单一来源：res 规则/前缀派生/path_rules 盖戳）+ res.rs（资源同步）+ watch.rs（监听去重/状态/配置热更新）
   project.rs                # 初始化(含锁)/框架下载/三路哈希增量更新/最近项目/应用设置
-  config.rs                 # bgd.json overlay 读写（bgd_default.json 基底 + bgd.json 覆盖）
+  config.rs                 # bgd.json overlay 读写（工具内建默认基底 + bgd.json 覆盖）
+bgd_default.json            # 工具内建默认配置唯一来源（exe 内嵌 + 入口释放到安装目录仅供查看）
   apps.rs                   # 应用市场：registry 拉取/安装/卸载/静默自启/停止应用
   secret.rs                 # 敏感凭证存储（github_token 存 Windows 凭据管理器）
 ```
@@ -87,7 +89,11 @@ src-tauri/src/
 - **AGENTS.md 同步**：项目根 `AGENTS.md` 由 `.bgd/src/AGENTS.md` 在初始化/构建/监听时同步生成（`sync_agents_md`，内容一致跳过），与 .gitignore 同属构建产物。
 - **资源系统**：`res/` 目录五类资源（image/particle/sound/spine/sprites）同步到引擎目录；`.lua` 中字符串字面量 `'libs/res/<类型>/...'` / `'src/res/<类型>/...'` 在构建时替换为运行时路径（sound 去 `.ogg` 扩展名，sprites 前缀 `@<ProjectName>` 从 map_settings.json 注入）。
 - **入口合并分界标记**：`src/main.lua` 标记之前为编辑器原文永久保留；之后为合并产物。原文若仍含标记（脏数据）则丢弃重建（自愈）。
-- **配置 overlay**：`libs/bgd_default.json`（框架下发）逐 key 被 `.bgd/bgd.json`（项目覆盖）覆盖；保存只写差异。
+- **配置 overlay**：工具内建默认（仓库根 `bgd_default.json`，`include_str!` 内嵌 exe + 入口释放到安装目录仅供查看）逐 key 被 `.bgd/bgd.json`（项目覆盖）覆盖；保存只写差异（深度相等即视为默认，空数组不落盘）。**所有路径配置统一相对项目根**（0.9.1 起，旧 `../` 相对 .bgd 写法废弃）。
+- **路径规则单一来源（rules.rs）**：res 五类资源规则（内建默认 + `res_rules` 按 res_type 稀疏覆盖）同时驱动 rewrite.rs 引用替换、res.rs 物理同步/清理、`path_rules.lua` 盖戳（dbg_bus eval 源码形态直通用，构建时生成到 `.bgd/src/client/path_rules.lua`）；源码前缀（`libs`/`src`）从 `libs_dir`/`game_dir` 目录名派生，不写死。
+- **替换排除（rewrite_excludes）**：相对项目根的完整路径（不含扩展名），命中文件或目录则正常进产物但跳过模块名/res 替换；单条内 `|` 分隔多个；默认含 `.bgd/src/client/path_rules`（盖戳保护，设置中可见可删，删除即失去保护）。
+- **行级注解跳过（rewrite_skip_annotation）**：某行含注解文本（默认 `-- @bgd:no-rewrite`）时其下一行跳过全部替换（require + res，entrance 管线同样生效）；空串禁用。
+- **配置热更新**：watch 线程每轮（≤300ms）轮询 bgd.json mtime，变化即热重读替换配置快照（不重启监听），并补调盖戳重生成；历史产物不追溯，全量构建后完全生效。
 - **三路哈希增量更新**：基准存 `.bgd/.framework_state.json`；冲突时本地保留 + 新版另存 `.framework-new`。文本文件统一 LF 后哈希（防 CRLF 误报）。
 - **监听去重**：同一文件 300ms 窗口聚合一次处理（防编辑器原子保存产生重复日志）。
 - **应用市场**：安装即覆盖写入 `apps/<id>/`（应用 id 仅允许字母/数字/下划线/连字符，安装/卸载/启动前校验，杜绝路径穿越）；升级按钮由前端对比 app-release.json 补全后的 registry version 与本地 app.json 版本号驱动，走 `install_app` 覆盖（升级前自动停止运行中实例：先 `--quit` 优雅退出、兜底 taskkill；装完按自启配置重启）。启动应用透传 `--project-path <当前项目>`。**清单读取链（R5）**：registry（[bgd_sce_appsdk](https://github.com/woaye168/bgd_sce_appsdk)，极简条目 id/name/repo）→ 各应用仓库 `releases/latest` 的 `app-release.json` asset 补全版本/描述/作者/asset名/版本说明（CI 合成；升级按钮展示版本说明；发版不再改 registry）。**静默自启**：勾选写入设置 `auto_start_apps`；默认值由 `default_auto_start` 下发（app-release.json 提供；用户本机勾选/取消优先，取消记入 `auto_start_disabled` 不再播种）；宿主启动时后台线程异步拉起（不阻塞首屏；进程列表一次查询内存匹配；子进程一律 CREATE_NO_WINDOW；透传 `--background` 由应用决定是否无窗口驻留）。**宿主联动**：退出时对所有运行中的已安装应用广播 `--quit`（兜底 taskkill）；切换项目时对静默自启应用执行 `<exe> notify project_path=<路径>` 解耦通知（应用自治处理）。

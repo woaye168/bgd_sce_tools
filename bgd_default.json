@@ -1,0 +1,29 @@
+{
+  "//": "bgd_sce_tools 内建默认配置（唯一来源）。exe 内嵌本文件并随安装释放到安装目录；项目级覆盖写在 <项目>/.bgd/bgd.json（只存差异）。所有路径相对项目根。",
+
+  "project_root": ".",
+  "enable_build_log": false,
+
+  "server_entrance": "src/main.lua",
+  "client_entrance": "ui/src/main.lua",
+
+  "libs_dir": ".bgd/libs",
+  "libs_server_target": "script/bgd_libs_server",
+  "libs_client_target": "ui/script/bgd_libs_client",
+  "libs_excludes": [
+    ".bgd/libs/types",
+    ".bgd/libs/client/eg",
+    ".bgd/libs/client/hook"
+  ],
+
+  "game_dir": ".bgd/src",
+  "game_server_target": "script/bgd_game_server",
+  "game_client_target": "ui/script/bgd_game_client",
+  "game_excludes": [],
+
+  "rewrite_excludes": [
+    ".bgd/src/client/path_rules"
+  ],
+  "rewrite_skip_annotation": "-- @bgd:no-rewrite",
+  "res_rules": []
+}

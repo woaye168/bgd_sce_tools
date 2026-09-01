@@ -1,12 +1,40 @@
-//! bgd.json 项目配置的读写（overlay：libs/bgd_default.json 基底 + .bgd/bgd.json 覆盖）
+//! bgd.json 项目配置的读写（overlay：工具内建默认 + .bgd/bgd.json 覆盖）
+//!
+//! 默认值唯一来源 = 仓库根 bgd_default.json（include_str! 内嵌进 exe，并随安装
+//! 释放到安装目录仅供查看，不作为配置层）。所有路径配置统一相对项目根（0.9.1 起，
+//! 旧版相对 .bgd 的 `../` 写法已废弃）。
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// 工具内建默认配置原文（仓库根 bgd_default.json，随 exe 内嵌/释放）
+pub const EMBEDDED_DEFAULTS: &str = include_str!("../../bgd_default.json");
+
 /// 项目状态字段（始终写入 bgd.json，不参与 default 回退）
 const STATE_KEYS: [&str; 2] = ["framework_version", "framework_repo"];
+
+/// 内建默认值（解析后的 JSON 对象；save 差异对比基准）
+pub fn embedded_defaults() -> serde_json::Map<String, serde_json::Value> {
+    static DEFAULTS: std::sync::LazyLock<serde_json::Map<String, serde_json::Value>> =
+        std::sync::LazyLock::new(|| {
+            serde_json::from_str(EMBEDDED_DEFAULTS).expect("内嵌 bgd_default.json 必须是合法 JSON 对象")
+        });
+    DEFAULTS.clone()
+}
+
+/// 释放内建默认配置到 exe 旁（可见性用途；内容一致跳过，升级后 exe 变化自动覆盖）。
+/// 在 exe 入口早期调用（CLI/GUI 两条路径都经过），失败不影响主流程。
+pub fn release_embedded_defaults() {
+    let Ok(exe) = std::env::current_exe() else { return };
+    let Some(dir) = exe.parent() else { return };
+    let out = dir.join("bgd_default.json");
+    let old = fs::read_to_string(&out).unwrap_or_default();
+    if old != EMBEDDED_DEFAULTS {
+        let _ = fs::write(&out, EMBEDDED_DEFAULTS);
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BgdConfig {
@@ -38,11 +66,16 @@ pub struct BgdConfig {
     #[serde(default)]
     pub game_excludes: Vec<String>,
 
-    /// 替换排除（0.9.0）：指定文件名/目录名正常进构建产物但跳过
-    /// 模块名/res 路径替换（与 libs_excludes「不构建」语义正交；目录边界匹配）。
-    /// 工具自产 artifact（path_rules.lua 盖戳）由构建编排层并入，无需用户配置。
+    /// 替换排除：相对项目根的完整路径（不含扩展名），命中文件或目录；
+    /// 正常进构建产物但跳过模块名/res 路径替换（与 libs_excludes「不构建」语义正交）。
+    /// 单条内可用 `|` 分隔多个路径。默认含工具自产盖戳 path_rules（可见、可删）。
     #[serde(default)]
     pub rewrite_excludes: Vec<String>,
+
+    /// 行级跳过注解（0.9.1）：某行含此注解文本时，其下一行跳过全部替换
+    /// （require 改写 + res 路径替换；entrance 合并管线同样生效）。空串 = 禁用。
+    #[serde(default)]
+    pub rewrite_skip_annotation: String,
 
     /// 资源路径规则覆盖（0.9.0）：按 res_type 稀疏覆盖内建默认，只列差异字段；
     /// 缺省 = 全部用内建默认（工具升级新规则默认值自动生效）
@@ -75,20 +108,17 @@ fn default_project_root() -> String {
 }
 
 impl BgdConfig {
-    /// overlay 加载：libs/bgd_default.json 为基底，.bgd/bgd.json 逐 key 覆盖
+    /// 内建默认配置（供「恢复默认」/CLI config reset 使用）
+    pub fn defaults() -> Self {
+        serde_json::from_value(serde_json::Value::Object(embedded_defaults()))
+            .expect("内嵌 bgd_default.json 必须能解析为 BgdConfig")
+    }
+
+    /// overlay 加载：工具内建默认为基底，.bgd/bgd.json 逐 key 覆盖
     pub fn load(bgd_root: &Path) -> Result<Self> {
         let mut merged = serde_json::Map::new();
-
-        let default_path = bgd_root.join("libs").join("bgd_default.json");
-        if default_path.exists() {
-            let text = fs::read_to_string(&default_path)
-                .with_context(|| format!("无法读取默认配置: {}", default_path.display()))?;
-            match serde_json::from_str(&text)
-                .with_context(|| format!("默认配置 JSON 解析失败: {}", default_path.display()))?
-            {
-                serde_json::Value::Object(obj) => merged = obj,
-                _ => anyhow::bail!("默认配置不是 JSON 对象: {}", default_path.display()),
-            }
+        for (k, v) in embedded_defaults() {
+            merged.insert(k, v);
         }
 
         let override_path = bgd_root.join("bgd.json");
@@ -112,17 +142,10 @@ impl BgdConfig {
         Ok(cfg)
     }
 
-    /// 保存为覆盖项：与 libs/bgd_default.json 逐 key 对比，只写不同项 + 状态字段
+    /// 保存为覆盖项：与工具内建默认逐 key 对比（深度相等即视为默认，含空数组），
+    /// 只写不同项 + 状态字段
     pub fn save(&self, bgd_root: &Path) -> Result<()> {
-        let default_path = bgd_root.join("libs").join("bgd_default.json");
-        let mut defaults = serde_json::Map::new();
-        if default_path.exists() {
-            if let Ok(text) = fs::read_to_string(&default_path) {
-                if let Ok(serde_json::Value::Object(obj)) = serde_json::from_str(&text) {
-                    defaults = obj;
-                }
-            }
-        }
+        let defaults = embedded_defaults();
 
         let self_value = serde_json::to_value(self)?;
         let mut overrides = serde_json::Map::new();
@@ -142,9 +165,19 @@ impl BgdConfig {
         Ok(())
     }
 
-    /// 配置中的相对路径（相对 .bgd 目录）转绝对路径
+    /// 项目根目录（.bgd 的上一级）
+    pub fn project_root_of(bgd_root: &Path) -> PathBuf {
+        bgd_root.parent().unwrap_or(bgd_root).to_path_buf()
+    }
+
+    /// 配置中的相对路径（相对项目根）转绝对路径；`..` 归一化，绝对路径原样
     pub fn abs(&self, bgd_root: &Path, rel: &str) -> PathBuf {
-        let joined = bgd_root.join(rel);
+        let rel_path = Path::new(rel);
+        let joined = if rel_path.is_absolute() {
+            rel_path.to_path_buf()
+        } else {
+            Self::project_root_of(bgd_root).join(rel)
+        };
         let mut out = PathBuf::new();
         for comp in joined.components() {
             match comp {
