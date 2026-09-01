@@ -49,21 +49,38 @@ fn strip_ext(p: &str) -> &str {
 /// 排除匹配（0.9.1 新语义）：candidate 与条目均为**相对项目根的完整路径**
 /// （如 ".bgd/src/client/path_rules"）。条目不含扩展名，单条内可用 `|` 分隔多个。
 /// 命中：candidate 去扩展名后与条目相等（文件），或 candidate 位于条目目录下（目录）。
+/// 条目归一化是防御性的：剥引号、剥已知文本扩展名（.lua/.html/.css/.js）——
+/// 用户从资源管理器/旧文档粘贴带扩展名或带引号的条目也能命中。
 pub fn is_excluded(candidate: &str, excludes: &[String]) -> bool {
     let cand = candidate.trim_start_matches('/').replace('\\', "/");
     let cand_noext = strip_ext(&cand);
     for raw in excludes {
         for part in raw.split('|') {
-            let e = part.trim().trim_matches(['/', '\\']).replace('\\', "/");
+            let e = part
+                .trim()
+                .trim_matches(['"', '\''])
+                .trim_matches(['/', '\\'])
+                .replace('\\', "/");
             if e.is_empty() {
                 continue;
             }
+            let e = strip_known_text_ext(&e);
             if cand_noext == e || cand.starts_with(&format!("{e}/")) {
                 return true;
             }
         }
     }
     false
+}
+
+/// 剥掉已知文本扩展名（仅 .lua/.html/.css/.js；目录名含其他点号不受影响）
+fn strip_known_text_ext(p: &str) -> &str {
+    for ext in [".lua", ".html", ".css", ".js"] {
+        if let Some(stripped) = p.strip_suffix(ext) {
+            return stripped;
+        }
+    }
+    p
 }
 
 /// code set 相对路径（"/client/x.lua"）→ 相对项目根路径（".bgd/src/client/x.lua"）

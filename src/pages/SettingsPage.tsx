@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "../lib/api";
-import type { AppSettings, BgdConfig, FrameworkUpdateInfo, ResRule, UpdateReport } from "../lib/types";
+import type { AppSettings, BgdConfig, FrameworkUpdateInfo, ResRule, ResRuleOverride, UpdateReport } from "../lib/types";
 import Card from "../components/Card";
 
 /** 设置页：通用设置（代理）、项目配置（bgd.json 表单）、框架更新 */
@@ -10,6 +10,7 @@ export default function SettingsPage() {
   const [defaults, setDefaults] = useState<BgdConfig | null>(null);
   const [appSettings, setAppSettings] = useState<AppSettings>({ proxy: "", watch_enabled: false, save_log: false, github_token: "", auto_start_apps: [], auto_start_disabled: [] });
   const [resRules, setResRules] = useState<ResRule[]>([]);
+  const [defaultRules, setDefaultRules] = useState<ResRule[]>([]);
   const [updateInfo, setUpdateInfo] = useState<FrameworkUpdateInfo | null>(null);
   const [report, setReport] = useState<UpdateReport | null>(null);
   const [message, setMessage] = useState("");
@@ -22,7 +23,7 @@ export default function SettingsPage() {
     api.getConfig().then(setConfig).catch(() => setConfig(null));
     api.getConfigDefaults().then(setDefaults).catch(() => {});
     api.getAppSettings().then(setAppSettings).catch(() => {});
-    api.getEffectiveResRules().then(setResRules).catch(() => {});
+    api.getDefaultResRules().then(setDefaultRules).catch(() => {});
   }, []);
 
   const saveAppSettings = async () => {
@@ -291,12 +292,11 @@ export default function SettingsPage() {
         {/* 替换排除（rewrite_excludes）：正常进构建产物但跳过模块名/res 路径替换；一行一条 */}
         <label className="mt-4 block">
           <span className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">
-            替换排除（rewrite_excludes）
+            构建替换排除（rewrite_excludes）
             {resetButton("rewrite_excludes")}
             <span className="ml-2 text-slate-400">
-              相对项目根的完整路径（不含扩展名），命中文件或整个目录；单行内可用 | 分隔多个，一行一条。
-              命中的文件正常进产物但跳过模块名/res 路径替换。
-              默认含 .bgd/src/client/path_rules（工具自产盖戳保护——删除该项后盖戳会被替换损坏！）
+              相对项目根完整路径（可不带扩展名），命中文件/目录则正常进产物、但跳过模块名/res 替换；| 分隔多个，一行一条。
+              默认项 path_rules 是盖戳保护，删除会失去保护
             </span>
           </span>
           <textarea
@@ -309,78 +309,116 @@ export default function SettingsPage() {
           />
         </label>
 
-        {/* 资源路径规则：生效值展示 + 行级覆盖编辑（写 bgd.json res_rules 稀疏覆盖） */}
+        {/* 资源路径规则：表格行 = 内建默认 + config.res_rules 本地合成（与编辑态同源，
+            恢复默认/删除/新增只是改编辑态，回显自动跟随；保存才落盘 bgd.json） */}
         <div className="mt-4">
           <p className="mb-1 text-xs font-medium text-slate-500 dark:text-slate-400">
             资源路径规则（res_rules）
             <span className="ml-2 text-slate-400">
-              源码 res 字面量 → 运行时路径；{'{prefix}'} = 构建目标目录名，{'{project}'} = 地图 ProjectName；
-              行级自定义写入 bgd.json 覆盖，恢复默认删除该行覆盖
+              {'{prefix}'} = 构建目标目录名，{'{project}'} = 地图 ProjectName；标 * 行为项目覆盖，可新增自定义类型
             </span>
           </p>
-          <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="bg-slate-50 text-left text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-                  <th className="px-2 py-1.5">类型</th>
-                  <th className="px-2 py-1.5">期望扩展</th>
-                  <th className="px-2 py-1.5">引用去扩展名</th>
-                  <th className="px-2 py-1.5">磁盘落位前缀</th>
-                  <th className="px-2 py-1.5">运行时引用前缀</th>
-                  <th className="px-2 py-1.5"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {resRules.map((rule) => {
-                  const overridden = (config?.res_rules ?? []).some((o) => o.res_type === rule.res_type);
-                  const patchRule = (field: keyof ResRule, value: string | boolean) => {
-                    if (!config) return;
-                    const nextRow = { ...rule, [field]: value };
-                    const others = (config.res_rules ?? []).filter((o) => o.res_type !== rule.res_type);
-                    setConfig({
-                      ...config,
-                      res_rules: [...others, {
-                        res_type: rule.res_type,
-                        expect_ext: nextRow.expect_ext,
-                        strip_ext_in_ref: nextRow.strip_ext_in_ref,
-                        disk_prefix: nextRow.disk_prefix,
-                        runtime_prefix: nextRow.runtime_prefix,
-                      }],
-                    });
-                    setResRules((prev) => prev.map((r) => (r.res_type === rule.res_type ? nextRow : r)));
-                  };
-                  const resetRule = () => {
-                    if (!config) return;
-                    setConfig({ ...config, res_rules: (config.res_rules ?? []).filter((o) => o.res_type !== rule.res_type) });
-                    api.getEffectiveResRules().then(setResRules).catch(() => {});
-                  };
-                  const cellInput = (field: "expect_ext" | "disk_prefix" | "runtime_prefix") => (
-                    <input
-                      value={String(rule[field] ?? "")}
-                      onChange={(e) => patchRule(field, e.target.value)}
-                      className="w-full min-w-32 rounded border border-slate-200 bg-transparent px-1.5 py-1 font-mono dark:border-slate-600"
-                    />
-                  );
-                  return (
-                    <tr key={rule.res_type} className={overridden ? "bg-indigo-50/50 dark:bg-indigo-950/30" : ""}>
-                      <td className="px-2 py-1.5 font-mono">{rule.res_type}{overridden && <span className="ml-1 text-indigo-500">*</span>}</td>
-                      <td className="px-2 py-1.5">{cellInput("expect_ext")}</td>
-                      <td className="px-2 py-1.5">
-                        <input type="checkbox" checked={rule.strip_ext_in_ref} onChange={(e) => patchRule("strip_ext_in_ref", e.target.checked)} />
-                      </td>
-                      <td className="px-2 py-1.5">{cellInput("disk_prefix")}</td>
-                      <td className="px-2 py-1.5">{cellInput("runtime_prefix")}</td>
-                      <td className="px-2 py-1.5">
-                        {overridden && (
-                          <button onClick={resetRule} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">恢复默认</button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          {(() => {
+            const overrides = config.res_rules ?? [];
+            type Row = ResRule;
+            const toRow = (ov?: ResRuleOverride, def?: ResRule): Row => ({
+              res_type: (ov?.res_type ?? def?.res_type) as string,
+              expect_ext: ov?.expect_ext ?? def?.expect_ext ?? "",
+              strip_ext_in_ref: ov?.strip_ext_in_ref ?? def?.strip_ext_in_ref ?? false,
+              disk_prefix: ov?.disk_prefix ?? def?.disk_prefix ?? "",
+              runtime_prefix: ov?.runtime_prefix ?? def?.runtime_prefix ?? "",
+            });
+            const rows = [
+              ...defaultRules.map((def) => {
+                const ov = overrides.find((o) => o.res_type === def.res_type);
+                return { row: toRow(ov, def), overridden: !!ov, custom: false };
+              }),
+              ...overrides
+                .filter((o) => !defaultRules.some((d) => d.res_type === o.res_type))
+                .map((ov) => ({ row: toRow(ov), overridden: true, custom: true })),
+            ];
+            const writeOverrides = (next: ResRuleOverride[]) => setConfig({ ...config, res_rules: next });
+            const patchRule = (resType: string, field: keyof Row, value: string | boolean) => {
+              const found = rows.find((r) => r.row.res_type === resType);
+              if (!found) return;
+              const next = { ...found.row, [field]: value };
+              writeOverrides([...overrides.filter((o) => o.res_type !== resType), next]);
+            };
+            const removeRule = (resType: string) => writeOverrides(overrides.filter((o) => o.res_type !== resType));
+            const renameRule = (oldType: string, newType: string) =>
+              writeOverrides(overrides.map((o) => (o.res_type === oldType ? { ...o, res_type: newType } : o)));
+            return (
+              <>
+                <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-slate-50 text-left text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                        <th className="px-2 py-1.5">类型</th>
+                        <th className="px-2 py-1.5">期望扩展</th>
+                        <th className="px-2 py-1.5">引用去扩展名</th>
+                        <th className="px-2 py-1.5">磁盘落位前缀</th>
+                        <th className="px-2 py-1.5">运行时引用前缀</th>
+                        <th className="px-2 py-1.5"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map(({ row, overridden, custom }) => {
+                        const cellInput = (field: "expect_ext" | "disk_prefix" | "runtime_prefix") => (
+                          <input
+                            value={String(row[field] ?? "")}
+                            onChange={(e) => patchRule(row.res_type, field, e.target.value)}
+                            className="w-full min-w-32 rounded border border-slate-200 bg-transparent px-1.5 py-1 font-mono dark:border-slate-600"
+                          />
+                        );
+                        return (
+                          <tr key={`${custom ? "c" : "d"}-${row.res_type}`} className={overridden ? "bg-indigo-50/50 dark:bg-indigo-950/30" : ""}>
+                            <td className="px-2 py-1.5 font-mono">
+                              {custom ? (
+                                <input
+                                  value={row.res_type}
+                                  onChange={(e) => renameRule(row.res_type, e.target.value.trim())}
+                                  className="w-24 rounded border border-slate-200 bg-transparent px-1.5 py-1 font-mono dark:border-slate-600"
+                                />
+                              ) : (
+                                row.res_type
+                              )}
+                              {overridden && <span className="ml-1 text-indigo-500">*</span>}
+                            </td>
+                            <td className="px-2 py-1.5">{cellInput("expect_ext")}</td>
+                            <td className="px-2 py-1.5">
+                              <input type="checkbox" checked={row.strip_ext_in_ref} onChange={(e) => patchRule(row.res_type, "strip_ext_in_ref", e.target.checked)} />
+                            </td>
+                            <td className="px-2 py-1.5">{cellInput("disk_prefix")}</td>
+                            <td className="px-2 py-1.5">{cellInput("runtime_prefix")}</td>
+                            <td className="px-2 py-1.5">
+                              {custom ? (
+                                <button onClick={() => removeRule(row.res_type)} className="text-rose-400 hover:text-rose-600">删除</button>
+                              ) : (
+                                overridden && (
+                                  <button onClick={() => removeRule(row.res_type)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">恢复默认</button>
+                                )
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <button
+                  onClick={() =>
+                    writeOverrides([
+                      ...overrides,
+                      { res_type: `new_type_${Date.now()}`, expect_ext: "", strip_ext_in_ref: false, disk_prefix: "", runtime_prefix: "" },
+                    ])
+                  }
+                  className="mt-2 rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
+                >
+                  + 新增类型
+                </button>
+              </>
+            );
+          })()}
         </div>
         <p className="mt-3 text-xs text-slate-400 dark:text-slate-500">
           enable_build_log / libs_excludes / game_excludes / rewrite_excludes / rewrite_skip_annotation / res_rules 也可用 CLI：

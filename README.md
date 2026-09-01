@@ -210,7 +210,7 @@ git push origin v0.1.4
 5. **入口合并（分界标记）**：`src/main.lua` 标记之前的内容视为原文永久保留，标记之后为 `libs/entrance/` + `src/entrance/` 的合并产物；重复构建幂等，「清除构建」还原原文
 6. **配置合并**：`libs/.emmyrc.json` + `src/.emmyrc.json` 深合并生成项目根配置（数组并集、标量游戏侧优先）；`.gitignore` 同理（文本拼接去重）；项目根 `AGENTS.md` 由 `src/AGENTS.md` 同步生成（构建/监听/初始化时，内容一致则跳过），要改就改 `.bgd/src/AGENTS.md`
 7. **init 渲染**：code set 根 `init.lua` 渲染 `{{target}}` / `{{module}}` / `{{time}}` 后输出到产物根目录
-8. **资源系统**：`res/` 目录五类资源（image/particle/sound/spine/sprites）同步到引擎目录；`.lua` 中 `'libs/res/<类型>/...'` / `'src/res/<类型>/...'` 构建时替换为运行时路径（sound 去 `.ogg`，sprites 前缀 `@<ProjectName>`）；资源类型/落位/运行时前缀均为「设置-构建路径配置」里的资源路径规则（`res_rules`），可按项目覆盖
+8. **资源系统**：`res/` 目录五类资源（image/particle/sound/spine/sprites）同步到引擎目录；`.lua` 中 `'libs/res/<类型>/...'` / `'src/res/<类型>/...'` 构建时替换为运行时路径（sound 去 `.ogg`，sprites 前缀 `@<ProjectName>`）；资源类型/落位/运行时前缀均为「设置-构建路径配置」里的资源路径规则（`res_rules`），可按项目覆盖，也可新增/删除自定义类型
 9. **配置 overlay**：生效配置 = 工具内建默认（exe 内嵌 `bgd_default.json`，随安装释放到安装目录仅供查看）逐 key 被 `.bgd/bgd.json`（项目覆盖）覆盖；保存只写差异。**所有路径配置统一相对项目根**（0.9.1 起）
 10. **替换排除（rewrite_excludes）**：相对项目根的完整路径（不含扩展名），命中文件或目录则正常进产物但跳过模块名/res 替换；单条内 `|` 分隔多个；默认含 `.bgd/src/client/path_rules`（工具自产盖戳保护，设置中可见可删）
 11. **行级注解跳过（rewrite_skip_annotation）**：某行含注解文本（默认 `-- @bgd:no-rewrite`）时其**下一行**跳过全部替换（require 改写 + res 替换，entrance 管线同样生效）；注解文本可配置，留空禁用

@@ -90,7 +90,7 @@ bgd_default.json            # 工具内建默认配置唯一来源（exe 内嵌 
 - **资源系统**：`res/` 目录五类资源（image/particle/sound/spine/sprites）同步到引擎目录；`.lua` 中字符串字面量 `'libs/res/<类型>/...'` / `'src/res/<类型>/...'` 在构建时替换为运行时路径（sound 去 `.ogg` 扩展名，sprites 前缀 `@<ProjectName>` 从 map_settings.json 注入）。
 - **入口合并分界标记**：`src/main.lua` 标记之前为编辑器原文永久保留；之后为合并产物。原文若仍含标记（脏数据）则丢弃重建（自愈）。
 - **配置 overlay**：工具内建默认（仓库根 `bgd_default.json`，`include_str!` 内嵌 exe + 入口释放到安装目录仅供查看）逐 key 被 `.bgd/bgd.json`（项目覆盖）覆盖；保存只写差异（深度相等即视为默认，空数组不落盘）。**所有路径配置统一相对项目根**（0.9.1 起，旧 `../` 相对 .bgd 写法废弃）。
-- **路径规则单一来源（rules.rs）**：res 五类资源规则（内建默认 + `res_rules` 按 res_type 稀疏覆盖）同时驱动 rewrite.rs 引用替换、res.rs 物理同步/清理、`path_rules.lua` 盖戳（dbg_bus eval 源码形态直通用，构建时生成到 `.bgd/src/client/path_rules.lua`）；源码前缀（`libs`/`src`）从 `libs_dir`/`game_dir` 目录名派生，不写死。
+- **路径规则单一来源（rules.rs）**：res 资源规则（内建默认 + `res_rules` 按 res_type 稀疏覆盖，未知 res_type = 新增自定义类型，设置界面可加/删行）同时驱动 rewrite.rs 引用替换、res.rs 物理同步/清理、`path_rules.lua` 盖戳（dbg_bus eval 源码形态直通用，构建时生成到 `.bgd/src/client/path_rules.lua`）；源码前缀（`libs`/`src`）从 `libs_dir`/`game_dir` 目录名派生，不写死。
 - **替换排除（rewrite_excludes）**：相对项目根的完整路径（不含扩展名），命中文件或目录则正常进产物但跳过模块名/res 替换；单条内 `|` 分隔多个；默认含 `.bgd/src/client/path_rules`（盖戳保护，设置中可见可删，删除即失去保护）。
 - **行级注解跳过（rewrite_skip_annotation）**：某行含注解文本（默认 `-- @bgd:no-rewrite`）时其下一行跳过全部替换（require + res，entrance 管线同样生效）；空串禁用。
 - **配置热更新**：watch 线程每轮（≤300ms）轮询 bgd.json mtime，变化即热重读替换配置快照（不重启监听），并补调盖戳重生成；历史产物不追溯，全量构建后完全生效。

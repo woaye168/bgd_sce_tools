@@ -26,6 +26,7 @@ export const api = {
   saveConfig: (config: BgdConfig) => invoke<void>("save_config", { config }),
   getConfigDefaults: () => invoke<BgdConfig>("get_config_defaults"),
   getEffectiveResRules: () => invoke<ResRule[]>("get_effective_res_rules"),
+  getDefaultResRules: () => invoke<ResRule[]>("get_default_res_rules"),
 
   fullBuild: () => invoke<void>("full_build"),
   cleanBuild: () => invoke<void>("clean_build"),

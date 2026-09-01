@@ -305,6 +305,13 @@ fn get_config_defaults() -> BgdConfig {
     BgdConfig::defaults()
 }
 
+/// 内建默认资源路径规则（设置界面 res_rules 行级「恢复默认」的本地展示用——
+/// 不能用 get_effective_res_rules：它读的是磁盘已保存配置，编辑未保存时会返回旧值）
+#[tauri::command]
+fn get_default_res_rules() -> Vec<builder::rules::ResRule> {
+    builder::rules::default_rules()
+}
+
 // ---------------------------------------------------------------- 构建命令
 
 #[tauri::command]
@@ -713,6 +720,7 @@ pub fn run() {
             save_config,
             get_config_defaults,
             get_effective_res_rules,
+            get_default_res_rules,
             full_build,
             clean_build,
             clean_logs,
