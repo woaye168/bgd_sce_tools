@@ -38,11 +38,36 @@ pub struct BgdConfig {
     #[serde(default)]
     pub game_excludes: Vec<String>,
 
+    /// 替换排除（0.9.0）：指定文件名/目录名正常进构建产物但跳过
+    /// 模块名/res 路径替换（与 libs_excludes「不构建」语义正交；目录边界匹配）。
+    /// 工具自产 artifact（path_rules.lua 盖戳）由构建编排层并入，无需用户配置。
+    #[serde(default)]
+    pub rewrite_excludes: Vec<String>,
+
+    /// 资源路径规则覆盖（0.9.0）：按 res_type 稀疏覆盖内建默认，只列差异字段；
+    /// 缺省 = 全部用内建默认（工具升级新规则默认值自动生效）
+    #[serde(default)]
+    pub res_rules: Vec<ResRuleOverride>,
+
     // ---- 项目状态（仅存在于 bgd.json） ----
     #[serde(default)]
     pub framework_version: String,
     #[serde(default)]
     pub framework_repo: String,
+}
+
+/// 资源路径规则的项目级覆盖（稀疏：只列要改的字段；语义见 builder/rules.rs ResRule）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResRuleOverride {
+    pub res_type: String,
+    #[serde(default)]
+    pub expect_ext: Option<String>,
+    #[serde(default)]
+    pub strip_ext_in_ref: Option<bool>,
+    #[serde(default)]
+    pub disk_prefix: Option<String>,
+    #[serde(default)]
+    pub runtime_prefix: Option<String>,
 }
 
 fn default_project_root() -> String {

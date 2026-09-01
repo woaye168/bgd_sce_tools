@@ -1,23 +1,21 @@
-//! res 资源同步：五类资源文件复制到引擎目录 / 清理
+//! res 资源同步：资源文件复制到引擎目录 / 清理
+//!
+//! 规则驱动（builder/rules.rs 单一来源）：类型集合/磁盘落位前缀全部来自规则，
+//! 本文件只负责复制与清理的编排。
 
-use super::{code_set_dir, is_excluded, LogFn};
+use super::{code_set_dir, is_excluded, rules, LogFn};
 use crate::config::BgdConfig;
 use anyhow::Result;
 use std::fs;
 use std::path::Path;
 
-/// res 资源类型 -> 引擎目标子路径（相对项目根）
-/// image/particle/sound/spine/sprites 五类，前缀按 code_set 区分
-fn res_target_subdir(res_type: &str, code_set: &str) -> Option<String> {
-    let prefix = if code_set == "libs" { "bgd_libs_client" } else { "bgd_game_client" };
-    match res_type {
-        "image" => Some(format!("ui/image/image/{prefix}")),
-        "particle" => Some(format!("res/effect/{prefix}")),
-        "sound" => Some(format!("res/sound/{prefix}")),
-        "spine" => Some(format!("ui/spine/{prefix}")),
-        "sprites" => Some(format!("ui/image/sprites/{prefix}")),
-        _ => None,
-    }
+/// 资源类型 -> 引擎目标子路径（相对项目根；规则 disk_prefix 解析）
+fn res_target_subdir(res_type: &str, code_set: &str, cfg: &BgdConfig, bgd_root: &Path) -> Option<String> {
+    let project = rules::project_name(bgd_root).unwrap_or_else(|_| "unknown".to_string());
+    rules::effective_rules(cfg)
+        .into_iter()
+        .find(|r| r.res_type == res_type)
+        .map(|r| rules::resolve_template(&r.disk_prefix, code_set, cfg, &project))
 }
 
 /// 同步单个 res 资源文件到引擎目录（二进制原样复制）
@@ -41,7 +39,7 @@ pub(super) fn sync_res_file(
     }
     let res_type = parts[1];
     let sub_path = parts[2];
-    let Some(target_sub) = res_target_subdir(res_type, code_set) else {
+    let Some(target_sub) = res_target_subdir(res_type, code_set, cfg, bgd_root) else {
         log(&format!("[warn] 未知资源类型: [{code_set}] {rel}"));
         return Ok(0);
     };
@@ -55,18 +53,13 @@ pub(super) fn sync_res_file(
     Ok(1)
 }
 
-/// 清除同步到引擎目录的资源文件（ui/image/、res/effect/ 等下的 bgd_* 目录）
-pub(super) fn clean_res_files(bgd_root: &Path, log: &LogFn) -> Result<()> {
+/// 清除同步到引擎目录的资源文件（规则 disk_prefix 全表 × 双 code set）
+pub(super) fn clean_res_files(bgd_root: &Path, cfg: &BgdConfig, log: &LogFn) -> Result<()> {
     let project_root = bgd_root.parent().unwrap_or(bgd_root);
+    let project = rules::project_name(bgd_root).unwrap_or_else(|_| "unknown".to_string());
     for code_set in ["libs", "game"] {
-        let prefix = if code_set == "libs" { "bgd_libs_client" } else { "bgd_game_client" };
-        for sub in [
-            format!("ui/image/image/{prefix}"),
-            format!("res/effect/{prefix}"),
-            format!("res/sound/{prefix}"),
-            format!("ui/spine/{prefix}"),
-            format!("ui/image/sprites/{prefix}"),
-        ] {
+        for rule in rules::effective_rules(cfg) {
+            let sub = rules::resolve_template(&rule.disk_prefix, code_set, cfg, &project);
             let path = project_root.join(&sub);
             if path.is_dir() {
                 fs::remove_dir_all(&path)?;

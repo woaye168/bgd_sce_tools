@@ -10,6 +10,7 @@ import type {
   InstalledApp,
   LogEvent,
   ProjectInfo,
+  ResRule,
   SelfUpdateInfo,
   UpdateReport,
 } from "./types";
@@ -23,6 +24,7 @@ export const api = {
 
   getConfig: () => invoke<BgdConfig>("get_config"),
   saveConfig: (config: BgdConfig) => invoke<void>("save_config", { config }),
+  getEffectiveResRules: () => invoke<ResRule[]>("get_effective_res_rules"),
 
   fullBuild: () => invoke<void>("full_build"),
   cleanBuild: () => invoke<void>("clean_build"),

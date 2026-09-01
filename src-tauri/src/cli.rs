@@ -201,6 +201,11 @@ fn set_config_field(cfg: &mut BgdConfig, key: &str, value: &str) -> Result<()> {
         "game_client_target" => cfg.game_client_target = value.to_string(),
         "libs_excludes" => cfg.libs_excludes = parse_list(value)?,
         "game_excludes" => cfg.game_excludes = parse_list(value)?,
+        "rewrite_excludes" => cfg.rewrite_excludes = parse_list(value)?,
+        "res_rules" => {
+            cfg.res_rules = serde_json::from_str(value)
+                .with_context(|| format!("res_rules 需用 JSON 数组格式（对象含 res_type 等字段）: {value}"))?
+        }
         "framework_version" => cfg.framework_version = value.to_string(),
         "framework_repo" => cfg.framework_repo = value.to_string(),
         other => return Err(anyhow::anyhow!("未知配置键: {other}")),

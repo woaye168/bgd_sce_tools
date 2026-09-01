@@ -8,6 +8,7 @@
 mod merge;
 mod res;
 mod rewrite;
+pub mod rules;
 mod watch;
 
 pub use merge::{
@@ -15,6 +16,7 @@ pub use merge::{
     update_entrance,
 };
 pub use rewrite::rewrite_lua;
+pub use rules::write_path_rules;
 pub use watch::{
     is_watching, remove_watch_state, start_watch, watch_state_path, write_watch_state, WatchState,
     WATCH_STATE_FILE,
@@ -60,8 +62,11 @@ fn ext_of(path: &Path) -> String {
         .to_lowercase()
 }
 
-/// 单文件复制：lua 改写模块名；html/css/js 包装为 lua 字符串模块；其余二进制原样
-fn transform_and_write(src: &Path, dest: &Path, side: &str, cfg: &BgdConfig, bgd_root: &Path, log: &LogFn) -> Result<bool> {
+/// 单文件复制：lua 改写模块名；html/css/js 包装为 lua 字符串模块；其余二进制原样。
+/// skip_rewrite：命中 rewrite_excludes 的文件正常进产物但跳过模块名/res 替换
+///（规则见 rules::effective_rewrite_excludes；path_rules.lua 盖戳即靠此保护——
+/// 其内容为运行时终值，替换会损坏）
+fn transform_and_write(src: &Path, dest: &Path, side: &str, cfg: &BgdConfig, bgd_root: &Path, skip_rewrite: bool, log: &LogFn) -> Result<bool> {
     let ext = ext_of(src);
     let dest = if TEXT_EXTS.contains(&ext.as_str()) && ext != "lua" {
         dest.with_extension("lua")
@@ -76,9 +81,11 @@ fn transform_and_write(src: &Path, dest: &Path, side: &str, cfg: &BgdConfig, bgd
     if TEXT_EXTS.contains(&ext.as_str()) {
         let content = fs::read_to_string(src)
             .with_context(|| format!("无法读取源文件: {}", src.display()))?;
-        let content = if ext == "lua" {
+        let content = if ext == "lua" && !skip_rewrite {
             let content = rewrite::rewrite_lua(&content, side, cfg);
-            rewrite::rewrite_res_paths(&content, bgd_root, log)
+            rewrite::rewrite_res_paths(&content, bgd_root, cfg, log)
+        } else if ext == "lua" {
+            content
         } else {
             format!("return [===[{content}]===]")
         };
@@ -157,10 +164,16 @@ pub fn build_one_file(
         return res::sync_res_file(bgd_root, cfg, code_set, &rel, src_abs, log);
     }
 
+    // 替换排除（rewrite_excludes）：正常进产物但跳过模块名/res 替换
+    let skip_rewrite = is_excluded(&rel, &rules::effective_rewrite_excludes(cfg));
+    if skip_rewrite {
+        log(&format!("[ok] rewrite-excluded: [{code_set}] {rel}"));
+    }
+
     let mut count = 0;
     for side in sides_for(&rel) {
         let dest = dest_for(&rel, side, code_set, bgd_root, cfg);
-        if transform_and_write(src_abs, &dest, side, cfg, bgd_root, log)? {
+        if transform_and_write(src_abs, &dest, side, cfg, bgd_root, skip_rewrite, log)? {
             log(&format!("[ok] {side}: [{code_set}] {rel}"));
             count += 1;
         }
@@ -195,6 +208,7 @@ pub fn build_code_set(code_set: &str, bgd_root: &Path, cfg: &BgdConfig, log: &Lo
 pub fn build_all(bgd_root: &Path, cfg: &BgdConfig, log: &LogFn) -> Result<()> {
     log("===== 开始全量构建 =====");
     regen_api_aggregations(bgd_root, cfg, log)?;
+    rules::write_path_rules(bgd_root, cfg, log)?; // 路径规则盖戳（先于构建，当次进产物）
     let libs_count = build_code_set("libs", bgd_root, cfg, log)?;
     let game_count = build_code_set("game", bgd_root, cfg, log)?;
     render_root_init(bgd_root, cfg, log)?;
@@ -227,7 +241,7 @@ pub fn clean(bgd_root: &Path, cfg: &BgdConfig, log: &LogFn) -> Result<()> {
     }
     merge::restore_entrance("server", bgd_root, cfg, log)?;
     merge::restore_entrance("client", bgd_root, cfg, log)?;
-    res::clean_res_files(bgd_root, log)?;
+    res::clean_res_files(bgd_root, cfg, log)?;
     log("===== 清理完成 =====");
     Ok(())
 }

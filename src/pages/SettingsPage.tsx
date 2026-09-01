@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "../lib/api";
-import type { AppSettings, BgdConfig, FrameworkUpdateInfo, UpdateReport } from "../lib/types";
+import type { AppSettings, BgdConfig, FrameworkUpdateInfo, ResRule, UpdateReport } from "../lib/types";
 import Card from "../components/Card";
 
 /** 设置页：通用设置（代理）、项目配置（bgd.json 表单）、框架更新 */
 export default function SettingsPage() {
   const [config, setConfig] = useState<BgdConfig | null>(null);
   const [appSettings, setAppSettings] = useState<AppSettings>({ proxy: "", watch_enabled: false, save_log: false, github_token: "", auto_start_apps: [], auto_start_disabled: [] });
+  const [resRules, setResRules] = useState<ResRule[]>([]);
   const [updateInfo, setUpdateInfo] = useState<FrameworkUpdateInfo | null>(null);
   const [report, setReport] = useState<UpdateReport | null>(null);
   const [message, setMessage] = useState("");
@@ -19,6 +20,7 @@ export default function SettingsPage() {
   useEffect(() => {
     api.getConfig().then(setConfig).catch(() => setConfig(null));
     api.getAppSettings().then(setAppSettings).catch(() => {});
+    api.getEffectiveResRules().then(setResRules).catch(() => {});
   }, []);
 
   const saveAppSettings = async () => {
@@ -264,8 +266,102 @@ export default function SettingsPage() {
           {textField("客户端入口", "client_entrance")}
 
         </div>
+
+        {/* 替换排除（rewrite_excludes）：正常进构建产物但跳过模块名/res 路径替换；一行一条 */}
+        <label className="mt-4 block">
+          <span className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">
+            替换排除（rewrite_excludes）
+            <span className="ml-2 text-slate-400">
+              指定文件名/目录名（相对源码根，如 client/path_rules.lua），一行一条；
+              命中的文件正常进产物但跳过模块名/res 路径替换（工具自产盖戳文件自动并入，无需在此配置）
+            </span>
+          </span>
+          <textarea
+            rows={2}
+            value={(config.rewrite_excludes ?? []).join("\n")}
+            onChange={(e) =>
+              set("rewrite_excludes", e.target.value.split("\n").map((s) => s.trim()).filter((s) => s !== ""))
+            }
+            className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 font-mono text-xs text-slate-700 dark:border-slate-600 dark:text-slate-200"
+          />
+        </label>
+
+        {/* 资源路径规则：生效值展示 + 行级覆盖编辑（写 bgd.json res_rules 稀疏覆盖） */}
+        <div className="mt-4">
+          <p className="mb-1 text-xs font-medium text-slate-500 dark:text-slate-400">
+            资源路径规则（res_rules）
+            <span className="ml-2 text-slate-400">
+              源码 res 字面量 → 运行时路径；{'{prefix}'} = 构建目标目录名，{'{project}'} = 地图 ProjectName；
+              行级自定义写入 bgd.json 覆盖，恢复默认删除该行覆盖
+            </span>
+          </p>
+          <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-slate-50 text-left text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                  <th className="px-2 py-1.5">类型</th>
+                  <th className="px-2 py-1.5">期望扩展</th>
+                  <th className="px-2 py-1.5">引用去扩展名</th>
+                  <th className="px-2 py-1.5">磁盘落位前缀</th>
+                  <th className="px-2 py-1.5">运行时引用前缀</th>
+                  <th className="px-2 py-1.5"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {resRules.map((rule) => {
+                  const overridden = (config?.res_rules ?? []).some((o) => o.res_type === rule.res_type);
+                  const patchRule = (field: keyof ResRule, value: string | boolean) => {
+                    if (!config) return;
+                    const nextRow = { ...rule, [field]: value };
+                    const others = (config.res_rules ?? []).filter((o) => o.res_type !== rule.res_type);
+                    setConfig({
+                      ...config,
+                      res_rules: [...others, {
+                        res_type: rule.res_type,
+                        expect_ext: nextRow.expect_ext,
+                        strip_ext_in_ref: nextRow.strip_ext_in_ref,
+                        disk_prefix: nextRow.disk_prefix,
+                        runtime_prefix: nextRow.runtime_prefix,
+                      }],
+                    });
+                    setResRules((prev) => prev.map((r) => (r.res_type === rule.res_type ? nextRow : r)));
+                  };
+                  const resetRule = () => {
+                    if (!config) return;
+                    setConfig({ ...config, res_rules: (config.res_rules ?? []).filter((o) => o.res_type !== rule.res_type) });
+                    api.getEffectiveResRules().then(setResRules).catch(() => {});
+                  };
+                  const cellInput = (field: "expect_ext" | "disk_prefix" | "runtime_prefix") => (
+                    <input
+                      value={String(rule[field] ?? "")}
+                      onChange={(e) => patchRule(field, e.target.value)}
+                      className="w-full min-w-32 rounded border border-slate-200 bg-transparent px-1.5 py-1 font-mono dark:border-slate-600"
+                    />
+                  );
+                  return (
+                    <tr key={rule.res_type} className={overridden ? "bg-indigo-50/50 dark:bg-indigo-950/30" : ""}>
+                      <td className="px-2 py-1.5 font-mono">{rule.res_type}{overridden && <span className="ml-1 text-indigo-500">*</span>}</td>
+                      <td className="px-2 py-1.5">{cellInput("expect_ext")}</td>
+                      <td className="px-2 py-1.5">
+                        <input type="checkbox" checked={rule.strip_ext_in_ref} onChange={(e) => patchRule("strip_ext_in_ref", e.target.checked)} />
+                      </td>
+                      <td className="px-2 py-1.5">{cellInput("disk_prefix")}</td>
+                      <td className="px-2 py-1.5">{cellInput("runtime_prefix")}</td>
+                      <td className="px-2 py-1.5">
+                        {overridden && (
+                          <button onClick={resetRule} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">恢复默认</button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
         <p className="mt-3 text-xs text-slate-400 dark:text-slate-500">
-          enable_build_log / libs_excludes / game_excludes 请使用 CLI 修改：bgd_sce_tools config set &lt;键&gt; &lt;值&gt; --project &lt;项目路径&gt;
+          enable_build_log / libs_excludes / game_excludes / rewrite_excludes / res_rules 也可用 CLI：
+          bgd_sce_tools config set &lt;键&gt; &lt;值&gt; --project &lt;项目路径&gt;（数组用 JSON 数组形式）
         </p>
         <button
           onClick={save}

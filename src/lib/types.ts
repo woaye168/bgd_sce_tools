@@ -1,5 +1,23 @@
 /** 与后端交互的类型定义 */
 
+/** 资源路径规则的项目级覆盖（稀疏：只列要改的字段；语义见 builder/rules.rs） */
+export interface ResRuleOverride {
+  res_type: string;
+  expect_ext?: string | null;
+  strip_ext_in_ref?: boolean | null;
+  disk_prefix?: string | null;
+  runtime_prefix?: string | null;
+}
+
+/** 资源路径规则（生效形态：内建默认 + bgd.json 覆盖合成） */
+export interface ResRule {
+  res_type: string;
+  expect_ext: string;
+  strip_ext_in_ref: boolean;
+  disk_prefix: string;
+  runtime_prefix: string;
+}
+
 export interface BgdConfig {
   project_root: string;
   enable_build_log: boolean;
@@ -13,6 +31,10 @@ export interface BgdConfig {
   game_server_target: string;
   game_client_target: string;
   game_excludes: string[];
+  /** 替换排除：指定文件名/目录名正常构建但跳过模块名/res 路径替换 */
+  rewrite_excludes: string[];
+  /** 资源路径规则覆盖（稀疏，按 res_type；空 = 全部内建默认） */
+  res_rules: ResRuleOverride[];
   framework_version: string;
   framework_repo: string;
 }

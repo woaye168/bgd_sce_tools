@@ -291,6 +291,14 @@ fn save_config(state: State<AppState>, config: BgdConfig) -> Result<(), String> 
     config.save(&bgd_root).map_err(|e| e.to_string())
 }
 
+/// 生效的资源路径规则（内建默认 + bgd.json res_rules 覆盖合成；设置界面展示用）
+#[tauri::command]
+fn get_effective_res_rules(state: State<AppState>) -> Result<Vec<builder::rules::ResRule>, String> {
+    let bgd_root = state.bgd_root()?;
+    let cfg = load_cfg(&bgd_root)?;
+    Ok(builder::rules::effective_rules(&cfg))
+}
+
 // ---------------------------------------------------------------- 构建命令
 
 #[tauri::command]
@@ -697,6 +705,7 @@ pub fn run() {
             get_project_info,
             get_config,
             save_config,
+            get_effective_res_rules,
             full_build,
             clean_build,
             clean_logs,
