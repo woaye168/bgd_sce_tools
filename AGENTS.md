@@ -129,3 +129,7 @@ Release notes 由 workflow 用 git log 自动归纳版本间提交（"版本说�
 - `pnpm` 在本机沙箱环境不稳定，本地验证前端改用 `npm install` + `node node_modules/typescript/bin/tsc` + `node node_modules/vite/bin/vite.js build`。
 - 终端输出中文会 GBK 乱码，属显示问题，不影响实际写入文件/仓库的内容。
 - 编译/写文件可直接在仓库内进行；个别沙箱环境如遇写权限问题，回退到 `D:/sce_online/Res/maps/bgd_glzy` 下的临时副本执行。
+
+## AI 工具纪律（Trae）
+
+- **同一文件的多个编辑必须串行**：SearchReplace 并行编辑同一文件存在 read-modify-write 竞态——各调用均报成功，实际互相覆盖静默丢编辑（甚至新旧文本交织）。一条消息对同一文件只发一个编辑；不同文件才可并行；批量编辑后复读关键区域复核落盘。
