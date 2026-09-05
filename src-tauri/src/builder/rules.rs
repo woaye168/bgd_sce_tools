@@ -119,7 +119,7 @@ pub fn prefix_for(code_set: &str, cfg: &BgdConfig) -> String {
         .into_owned()
 }
 
-/// 服务端运行时根名（0.9.2：path_rules 盖戳移 common 双端共享后，modules_server 段用）：
+/// 服务端运行时根名（path_rules 盖戳 modules_server 段用）：
 /// cfg.libs_server_target/game_server_target 的目录名（bgd_libs_server/bgd_game_server）
 pub fn server_prefix_for(code_set: &str, cfg: &BgdConfig) -> String {
     let target = if code_set == "libs" {
@@ -190,16 +190,12 @@ pub fn resolve_template(template: &str, code_set: &str, cfg: &BgdConfig, project
 // ---------------------------------------------------------------------------
 
 /// 盖戳文件相对路径（相对游戏源码目录 src/）。
-/// 0.9.2 起从 client/ 移到 **common/**——服务端 eval（dbg_server）同样需要本表，
+/// 位于 **common/**——服务端 eval（dbg_server）与客户端 eval（dbg_bus）同样需要本表，
 /// client 目录只进客户端产物，common 双端共享（配合 libs/entrance/{client,server}.lua
 /// 均 require 'src.common.path_rules'）。
 /// 本文件内容为运行时终值，构建替换会损坏它——默认由 rewrite_excludes 内建默认项
 /// `.bgd/src/common/path_rules` 保护（可见、可在设置中删除，删除即失去保护）。
 pub const PATH_RULES_REL: &str = "common/path_rules.lua";
-
-/// 0.9.1 及之前的旧盖戳位置（迁移清理：构建时若存在则删除——旧 entrance 已不再加载它，
-/// 且排除项已移到 common，旧文件进产物会被替换损坏）
-const PATH_RULES_LEGACY_REL: &str = "client/path_rules.lua";
 
 /// 渲染 path_rules.lua 内容（全部为解析后的原样终值，消费端只做前缀替换）
 pub fn render_path_rules_lua(bgd_root: &Path, cfg: &BgdConfig) -> Result<String> {
@@ -281,18 +277,10 @@ return _G.bgd_path_rules
     ))
 }
 
-/// 盖戳写入 .bgd/src/<PATH_RULES_REL>（0.9.2 起 common/path_rules.lua；
-/// 内容一致不重写，防 watch 抖动）。旧位置 client/path_rules.lua 存在即迁移删除。
+/// 盖戳写入 .bgd/src/<PATH_RULES_REL>（内容一致不重写，防 watch 抖动）
 pub fn write_path_rules(bgd_root: &Path, cfg: &BgdConfig, log: &crate::builder::LogFn) -> Result<()> {
     let content = render_path_rules_lua(bgd_root, cfg)?;
-    let game_root = cfg.abs(bgd_root, &cfg.game_dir);
-    let out = game_root.join(PATH_RULES_REL);
-    // 迁移清理（0.9.1 及之前盖戳在 client/ 下；旧 entrance 不再加载，残留进产物会被替换损坏）
-    let legacy = game_root.join(PATH_RULES_LEGACY_REL);
-    if legacy.exists() {
-        fs::remove_file(&legacy)?;
-        log(&format!("[gen] 旧位置盖戳已迁移删除: {}", legacy.display()));
-    }
+    let out = cfg.abs(bgd_root, &cfg.game_dir).join(PATH_RULES_REL);
     let old = fs::read_to_string(&out).unwrap_or_default();
     if old == content {
         return Ok(());
