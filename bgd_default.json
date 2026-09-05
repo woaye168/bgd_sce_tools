@@ -22,7 +22,7 @@
   "game_excludes": [],
 
   "rewrite_excludes": [
-    ".bgd/src/client/path_rules"
+    ".bgd/src/common/path_rules"
   ],
   "rewrite_skip_annotation": "-- @bgd:no-rewrite",
   "res_rules": []

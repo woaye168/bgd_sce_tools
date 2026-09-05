@@ -119,6 +119,21 @@ pub fn prefix_for(code_set: &str, cfg: &BgdConfig) -> String {
         .into_owned()
 }
 
+/// 服务端运行时根名（0.9.2：path_rules 盖戳移 common 双端共享后，modules_server 段用）：
+/// cfg.libs_server_target/game_server_target 的目录名（bgd_libs_server/bgd_game_server）
+pub fn server_prefix_for(code_set: &str, cfg: &BgdConfig) -> String {
+    let target = if code_set == "libs" {
+        &cfg.libs_server_target
+    } else {
+        &cfg.game_server_target
+    };
+    Path::new(target)
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned()
+}
+
 /// 源码引用前缀（require('libs.x') / 'libs/res/...' 的 libs 段）：cfg.libs_dir 目录名
 pub fn libs_prefix(cfg: &BgdConfig) -> String {
     Path::new(&cfg.libs_dir)
@@ -175,15 +190,24 @@ pub fn resolve_template(template: &str, code_set: &str, cfg: &BgdConfig, project
 // ---------------------------------------------------------------------------
 
 /// 盖戳文件相对路径（相对游戏源码目录 src/）。
+/// 0.9.2 起从 client/ 移到 **common/**——服务端 eval（dbg_server）同样需要本表，
+/// client 目录只进客户端产物，common 双端共享（配合 libs/entrance/{client,server}.lua
+/// 均 require 'src.common.path_rules'）。
 /// 本文件内容为运行时终值，构建替换会损坏它——默认由 rewrite_excludes 内建默认项
-/// `.bgd/src/client/path_rules` 保护（可见、可在设置中删除，删除即失去保护）。
-pub const PATH_RULES_REL: &str = "client/path_rules.lua";
+/// `.bgd/src/common/path_rules` 保护（可见、可在设置中删除，删除即失去保护）。
+pub const PATH_RULES_REL: &str = "common/path_rules.lua";
+
+/// 0.9.1 及之前的旧盖戳位置（迁移清理：构建时若存在则删除——旧 entrance 已不再加载它，
+/// 且排除项已移到 common，旧文件进产物会被替换损坏）
+const PATH_RULES_LEGACY_REL: &str = "client/path_rules.lua";
 
 /// 渲染 path_rules.lua 内容（全部为解析后的原样终值，消费端只做前缀替换）
 pub fn render_path_rules_lua(bgd_root: &Path, cfg: &BgdConfig) -> Result<String> {
     let project = project_name_cached(bgd_root);
     let libs_root = prefix_for("libs", cfg);
     let game_root = prefix_for("game", cfg);
+    let libs_root_s = server_prefix_for("libs", cfg);
+    let game_root_s = server_prefix_for("game", cfg);
     let libs_p = libs_prefix(cfg);
     let src_p = src_prefix(cfg);
 
@@ -209,24 +233,25 @@ pub fn render_path_rules_lua(bgd_root: &Path, cfg: &BgdConfig) -> Result<String>
 --
 -- 这个文件是什么：
 --   源码形态路径（require 模块名 / res 资源字面量）→ 运行时路径的对照表。
---   供游戏 VM 内 dbg_bus 的 lua.eval 逃生舱把「与游戏源码逐字一致」的调试代码
---   翻译成运行时形态（MCP 与直连桥 HTTP 的 eval 都汇聚到 dbg_bus，双通道同权）。
+--   供 dbg_bus lua.eval（客户端 VM）与 dbg_server eval（服务端 VM）逃生舱把
+--   「与游戏源码逐字一致」的调试代码翻译成运行时形态（common 目录双端共享）。
 --
 -- 怎么来的：
 --   bgd_sce_tools build 时生成。规则在工具「设置-构建路径配置」查看/编辑
 --  （默认值内建于 tools；项目级覆盖写在 .bgd/bgd.json 的 res_rules）。
 --   工具改规则 → 下次 build 自动重新盖戳 → 即刻生效，无第二处需要同步。
---   本文件经 rewrite_excludes 内建默认项（.bgd/src/client/path_rules）保护：
+--   本文件经 rewrite_excludes 内建默认项（.bgd/src/common/path_rules）保护：
 --   内容已是运行时终值，构建替换会损坏它（该默认项在设置中可见、可删，删即失去保护）。
 --
 -- 怎么加载的（时序）：
---   .bgd/libs/entrance/client.lua（框架入口）顶部 pcall require
---  'src.client.path_rules' → bgd_sce_tools 的 entrance 合并机制把它合进
---   ui/src/main.lua 最前段 → 先于 libs/src init 执行 → _G.bgd_path_rules
---   从游戏启动起全局可用。加载失败会 log.error 响亮报错（无静默兜底）。
+--   .bgd/libs/entrance/{{client,server}}.lua（框架入口）顶部 pcall require
+--  'src.common.path_rules' → bgd_sce_tools 的 entrance 合并机制把它合进
+--   ui/src/main.lua 与 script/main.lua 最前段 → 先于 libs/src init 执行
+--   → _G.bgd_path_rules 双端从启动起全局可用。加载失败会 log.error 响亮报错（无静默兜底）。
 --
 -- 缺失怎么办：
---   dbg_bus eval 遇到 libs./src. 引用而 _G.bgd_path_rules 为 nil 时直接报错
+--   dbg_bus eval（客户端）/ dbg_server eval（服务端）遇到 libs./src. 引用而
+--   _G.bgd_path_rules 为 nil 时直接报错
 --  「path_rules 盖戳缺失：请用 bgd_sce_tools 重新构建项目」——说明工具版本
 --   过旧或构建被绕过。
 -- ============================================================================
@@ -240,6 +265,13 @@ _G.bgd_path_rules = {{
         ['{libs_p}']  = '{libs_root}',
         ['{src_p}']   = '{game_root}',
     }},
+    -- 服务端根名对照（0.9.2：dbg_server eval 用；res 段服务端不消费故无 server 版）
+    modules_server = {{
+        ['{libs_p}.'] = '{libs_root_s}.',
+        ['{src_p}.']  = '{game_root_s}.',
+        ['{libs_p}']  = '{libs_root_s}',
+        ['{src_p}']   = '{game_root_s}',
+    }},
     -- res 资源字面量前缀对照（斜杠形式，按序首个前缀命中；strip_ext = 引用去扩展名）
     res = {{
 {res_lines}    }},
@@ -249,13 +281,18 @@ return _G.bgd_path_rules
     ))
 }
 
-/// 盖戳写入 .bgd/src/client/path_rules.lua（内容一致不重写，防 watch 抖动）
+/// 盖戳写入 .bgd/src/<PATH_RULES_REL>（0.9.2 起 common/path_rules.lua；
+/// 内容一致不重写，防 watch 抖动）。旧位置 client/path_rules.lua 存在即迁移删除。
 pub fn write_path_rules(bgd_root: &Path, cfg: &BgdConfig, log: &crate::builder::LogFn) -> Result<()> {
     let content = render_path_rules_lua(bgd_root, cfg)?;
-    let out = cfg
-        .abs(bgd_root, &cfg.game_dir)
-        .join("client")
-        .join("path_rules.lua");
+    let game_root = cfg.abs(bgd_root, &cfg.game_dir);
+    let out = game_root.join(PATH_RULES_REL);
+    // 迁移清理（0.9.1 及之前盖戳在 client/ 下；旧 entrance 不再加载，残留进产物会被替换损坏）
+    let legacy = game_root.join(PATH_RULES_LEGACY_REL);
+    if legacy.exists() {
+        fs::remove_file(&legacy)?;
+        log(&format!("[gen] 旧位置盖戳已迁移删除: {}", legacy.display()));
+    }
     let old = fs::read_to_string(&out).unwrap_or_default();
     if old == content {
         return Ok(());
