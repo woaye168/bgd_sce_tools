@@ -130,6 +130,16 @@ Release notes 由 workflow 用 git log 自动归纳版本间提交（"版本说�
 - 终端输出中文会 GBK 乱码，属显示问题，不影响实际写入文件/仓库的内容。
 - 编译/写文件可直接在仓库内进行；个别沙箱环境如遇写权限问题，回退到 `D:/sce_online/Res/maps/bgd_glzy` 下的临时副本执行。
 
+## 关联知识库：bgd_sce_knowledge（源码知识库）
+
+SCE 官方 Lua 包的**可信源码底座**（私有仓库）：全部包的最新解密源码 + 历史版本归档 + 关键包技术文档。
+
+- **本地**：`<workspace>/bgd_sce_knowledge`（当前工作区的同名 folder，存在即直接用；不在工作区则按仓库名 `bgd_sce_knowledge` 在本机查找其克隆）
+- **远程**：`https://github.com/woaye168/bgd_sce_knowledge`（私有；本地缺失时可克隆）
+- **内容**：`source_code/<包名>/`（最新完整包源码，lua 已解密，`_manifest.json` 记版本）、`source_code_old/<包名>/<版本>/`（历史版本归档）、`knowledge_documents/`（@base/@script/@xdeditor/@xdeditor_startup/@lib_lobby/@server_lua_plus/@smallcard_shop 文档）
+- **何时用**：需要查官方包的**真实实现**（如 @base/@common 的实现库 client_base、script 库 API、xdeditor 界面机制）或做**跨版本差异对照**时以它为准——本机 `res/_m/` 现场可能被 sce_app_editor-patch 补丁污染，不可直接信任
+- **本仓库场景**：框架构建/调试涉及引擎官方包行为（require 根、path_rules、dbg_bus 端点所在库）时查 source_code
+
 ## AI 工具纪律（Trae）
 
 - **同一文件的多个编辑必须串行**：SearchReplace 并行编辑同一文件存在 read-modify-write 竞态——各调用均报成功，实际互相覆盖静默丢编辑（甚至新旧文本交织）。一条消息对同一文件只发一个编辑；不同文件才可并行；批量编辑后复读关键区域复核落盘。
