@@ -129,6 +129,7 @@ Release notes 由 workflow 用 git log 自动归纳版本间提交（"版本说�
 - `pnpm` 在本机沙箱环境不稳定，本地验证前端改用 `npm install` + `node node_modules/typescript/bin/tsc` + `node node_modules/vite/bin/vite.js build`。
 - 终端输出中文会 GBK 乱码，属显示问题，不影响实际写入文件/仓库的内容。
 - 编译/写文件可直接在仓库内进行；个别沙箱环境如遇写权限问题，回退到 `D:/sce_online/Res/maps/bgd_glzy` 下的临时副本执行。
+- CLI 验证一律用 `%LOCALAPPDATA%\bgd_sce_tools\bgd_sce_tools.exe`（安装版）；`src-tauri/target/` 下的旧构建产物可能缺新特性（如 rewrite_excludes 盖戳保护），用它会产出损坏构建（2026-09-13 实锤）。
 
 ## 关联知识库：bgd_sce_knowledge（源码知识库）
 
