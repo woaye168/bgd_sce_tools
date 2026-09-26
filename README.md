@@ -135,7 +135,8 @@ pnpm tauri build    # 产出 NSIS 安装包（src-tauri/target/release/bundle/�
 exe 命中子命令即以控制台模式执行（否则启动 GUI），可用于脚本与无 GUI 环境：
 
 ```bash
-bgd_sce_tools build --project <项目路径> [--log .bgd/log/build.log]   # 全量构建
+bgd_sce_tools build --project <项目路径> [--log .bgd/log/build.log]   # 全量构建（含 API 文档生成）
+bgd_sce_tools doc --project <项目路径> [--out <路径>]  # 单跑 API 文档（默认 → .bgd/doc/api_generated/）
 bgd_sce_tools watch --project <项目路径> [--log .bgd/log/watch.log]   # 监听更新（前台阻塞，Ctrl+C 停止）
 bgd_sce_tools clean --project <项目路径>             # 清除构建（还原入口原文）
 bgd_sce_tools clean-logs --project <项目路径>        # 清理日志

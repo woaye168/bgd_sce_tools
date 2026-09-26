@@ -15,7 +15,8 @@ bgd_sce_tools CLI
 用法: bgd_sce_tools <子命令> [选项]
 
 子命令:
-  build                  全量构建
+  build                  全量构建（含 API 文档生成 → .bgd/doc/api_generated/）
+  doc                    生成 API 文档（扫 api/ 目录 → .bgd/doc/api_generated/，--out <路径> 自定义输出）
   clean                  清除构建产物（还原入口原文）
   clean-logs             清理 .bgd/log 下的 .log 文件
   init                   初始化项目（下载框架生成 .bgd）
@@ -49,6 +50,8 @@ struct Cli {
     repo: String,
     force: bool,
     log_file: Option<PathBuf>,
+    /// doc 子命令的输出目录（相对 .bgd 或绝对路径）
+    out_dir: Option<PathBuf>,
     /// config/setting 的子命令与键值（get/set <key> [value]）
     extra: Vec<String>,
 }
@@ -62,6 +65,7 @@ fn parse_args() -> Result<Cli> {
         repo: String::new(),
         force: false,
         log_file: None,
+        out_dir: None,
         extra: Vec::new(),
     };
     while let Some(arg) = args.next() {
@@ -77,6 +81,9 @@ fn parse_args() -> Result<Cli> {
             }
             "--log" => {
                 cli.log_file = Some(PathBuf::from(args.next().context("--log 缺少路径")?));
+            }
+            "--out" => {
+                cli.out_dir = Some(PathBuf::from(args.next().context("--out 缺少路径")?));
             }
             "--force" => cli.force = true,
             "--help" | "-h" => {
@@ -214,8 +221,9 @@ fn set_config_field(cfg: &mut BgdConfig, key: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
-const CMDS: [&str; 11] = [
+const CMDS: [&str; 12] = [
     "build",
+    "doc",
     "watch",
     "clean",
     "clean-logs",
@@ -249,6 +257,10 @@ pub fn run() -> i32 {
             "build" => {
                 let (bgd_root, cfg) = load_project_config(&cli.project)?;
                 builder::build_all(&bgd_root, &cfg, &log)?;
+            }
+            "doc" => {
+                let (bgd_root, cfg) = load_project_config(&cli.project)?;
+                builder::generate_api_docs(&bgd_root, &cfg, cli.out_dir.as_deref(), &log)?;
             }
             "clean" => {
                 let (bgd_root, cfg) = load_project_config(&cli.project)?;

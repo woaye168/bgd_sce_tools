@@ -5,12 +5,14 @@
 //! 入口合并/emmyrc/gitignore/AGENTS 同步；watch=文件监听与去重、监听状态；本文件保留
 //! 主流程编排（build_all/clean/build_code_set/build_one_file）与跨模块共享的路径/排除辅助。
 
+mod docgen;
 mod merge;
 mod res;
 mod rewrite;
 pub mod rules;
 mod watch;
 
+pub use docgen::generate_api_docs;
 pub use merge::{
     merge_emmyrc, merge_gitignore, regen_api_aggregations, render_root_init, sync_agents_md,
     update_entrance,
@@ -265,6 +267,10 @@ pub fn build_all(bgd_root: &Path, cfg: &BgdConfig, log: &LogFn) -> Result<()> {
     merge_emmyrc(bgd_root, cfg, log)?;
     merge_gitignore(bgd_root, cfg, log)?;
     sync_agents_md(bgd_root, cfg, log)?;
+    // API 文档随全量构建刷新（文档生成失败不阻塞构建，降级为 warn）
+    if let Err(e) = docgen::generate_api_docs(bgd_root, cfg, None, log) {
+        log(&format!("[warn] api 文档生成失败（构建不受影响）: {e:#}"));
+    }
     log(&format!(
         "===== 构建完成！框架文件: {libs_count}，游戏文件: {game_count} ====="
     ));
@@ -290,6 +296,12 @@ pub fn clean(bgd_root: &Path, cfg: &BgdConfig, log: &LogFn) -> Result<()> {
     merge::restore_entrance("server", bgd_root, cfg, log)?;
     merge::restore_entrance("client", bgd_root, cfg, log)?;
     res::clean_res_files(bgd_root, cfg, log)?;
+    // API 文档同属构建产物，一并清除
+    let doc_out = bgd_root.join("doc").join("api_generated");
+    if doc_out.is_dir() {
+        fs::remove_dir_all(&doc_out)?;
+        log(&format!("  -> 已删除 {}", doc_out.display()));
+    }
     log("===== 清理完成 =====");
     Ok(())
 }

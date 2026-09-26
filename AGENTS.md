@@ -33,7 +33,8 @@ cargo build             # 构建 debug exe（在 src-tauri/ 下）
 exe 命中子命令即以控制台模式执行，否则启动 GUI。**测 CLI 就是测最终产物的真实代码路径**，不要另写 Python/脚本对照实现。
 
 ```bash
-bgd_sce_tools build --project <项目路径> [--log .bgd/log/build.log]   # 全量构建
+bgd_sce_tools build --project <项目路径> [--log .bgd/log/build.log]   # 全量构建（含 API 文档生成）
+bgd_sce_tools doc --project <项目路径> [--out <路径>]  # 单跑 API 文档（默认 → .bgd/doc/api_generated/）
 bgd_sce_tools watch --project <项目路径> [--log .bgd/log/watch.log]   # 监听更新（前台阻塞，Ctrl+C 停止）
 bgd_sce_tools clean --project <项目路径>             # 清除构建（还原入口原文）
 bgd_sce_tools clean-logs --project <项目路径>        # 清理 .bgd/log
@@ -72,7 +73,7 @@ src-tauri/src/
   main.rs                   # 二进制入口：CLI 分发 + GUI 启动
   cli.rs                    # CLI 子命令（本文件上方有同步约定）
   lib.rs                    # Tauri 命令注册、AppState、启动恢复
-  builder/                  # 构建核心：mod.rs 主流程编排（白名单构建/增量/清理/排除匹配）+ merge.rs（API聚合/init渲染/入口合并/配置合并）+ rewrite.rs（require/res 路径改写 + 行级注解跳过）+ rules.rs（路径规则单一来源：res 规则/前缀派生/path_rules 盖戳）+ res.rs（资源同步）+ watch.rs（监听去重/状态/配置热更新）
+  builder/                  # 构建核心：mod.rs 主流程编排（白名单构建/增量/清理/排除匹配）+ merge.rs（API聚合/init渲染/入口合并/配置合并）+ rewrite.rs（require/res 路径改写 + 行级注解跳过）+ rules.rs（路径规则单一来源：res 规则/前缀派生/path_rules 盖戳）+ res.rs（资源同步）+ watch.rs（监听去重/状态/配置热更新）+ docgen.rs（API 文档生成：扫 api/ 解析注释与成员 → Markdown；纯转发顺链 main + .d.lua 签名；缺头部/零注释成员 warn 反向校验）
   project.rs                # 初始化(含锁)/框架下载/三路哈希增量更新/最近项目/应用设置
   config.rs                 # bgd.json overlay 读写（工具内建默认基底 + bgd.json 覆盖）
 bgd_default.json            # 工具内建默认配置唯一来源（exe 内嵌 + 入口释放到安装目录仅供查看）
