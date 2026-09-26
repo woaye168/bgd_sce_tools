@@ -35,6 +35,10 @@ export interface BgdConfig {
   rewrite_excludes: string[];
   /** 行级跳过注解：某行含此文本时其下一行跳过全部替换（空串禁用） */
   rewrite_skip_annotation: string;
+  /** API 文档生成路径（相对项目根；build 自动生成、clean 连带清除） */
+  api_generated_dir: string;
+  /** API 文档跳过标记：api 模块头部注释含此文本时不进生成文档（空串禁用） */
+  doc_skip_annotation: string;
   /** 资源路径规则覆盖（稀疏，按 res_type；空 = 全部内建默认） */
   res_rules: ResRuleOverride[];
   framework_version: string;

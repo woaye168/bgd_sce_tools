@@ -296,8 +296,8 @@ pub fn clean(bgd_root: &Path, cfg: &BgdConfig, log: &LogFn) -> Result<()> {
     merge::restore_entrance("server", bgd_root, cfg, log)?;
     merge::restore_entrance("client", bgd_root, cfg, log)?;
     res::clean_res_files(bgd_root, cfg, log)?;
-    // API 文档同属构建产物，一并清除
-    let doc_out = bgd_root.join("doc").join("api_generated");
+    // API 文档同属构建产物，一并清除（路径走配置）
+    let doc_out = cfg.abs(bgd_root, &cfg.api_generated_dir);
     if doc_out.is_dir() {
         fs::remove_dir_all(&doc_out)?;
         log(&format!("  -> 已删除 {}", doc_out.display()));

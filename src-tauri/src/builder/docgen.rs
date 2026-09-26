@@ -107,9 +107,20 @@ fn parse_forward(line: &str) -> Option<String> {
     Some(rest[1..1 + end].to_string())
 }
 
+/// 跳过标记命中判定：注释文本 c 与配置标记 skip 都剥掉 "--" 前缀后包含匹配
+/// （strip_comment 已剥掉注释行的 "-- "，配置里的 "-- @bgd:xxx" 需对齐）。
+fn hit_skip(c: &str, skip: &str) -> bool {
+    if skip.is_empty() {
+        return false;
+    }
+    let marker = skip.trim_start_matches('-').trim();
+    !marker.is_empty() && c.contains(marker)
+}
+
 /// 解析一个 lua 文件为文档结构。
 /// keep_annotations=true 用于 .d.lua（保留 ---@param/@return 等注解行）。
-fn parse_lua(path: &Path, keep_annotations: bool) -> Result<LuaDoc> {
+/// skip_annotation=doc 跳过标记（cfg.doc_skip_annotation；空串 = 禁用）。
+fn parse_lua(path: &Path, keep_annotations: bool, skip_annotation: &str) -> Result<LuaDoc> {
     let content = fs::read_to_string(path)?;
     let mut doc = LuaDoc::default();
     let mut lines = content.lines().peekable();
@@ -125,8 +136,8 @@ fn parse_lua(path: &Path, keep_annotations: bool) -> Result<LuaDoc> {
         }
         match strip_comment(line) {
             Some(c) => {
-                // @bgd:no-doc 在 keep_comment 前判定（@ 注解行会被滤掉，提前拦）
-                if c.contains("@bgd:no-doc") {
+                // 跳过标记在 keep_comment 前判定（@ 注解行会被滤掉，提前拦）
+                if hit_skip(&c, skip_annotation) {
                     no_doc = true;
                 }
                 if keep_comment(&c, keep_annotations) {
@@ -162,7 +173,7 @@ fn parse_lua(path: &Path, keep_annotations: bool) -> Result<LuaDoc> {
             continue;
         }
         if let Some(c) = strip_comment(line) {
-            if c.contains("@bgd:no-doc") {
+            if hit_skip(&c, skip_annotation) {
                 no_doc = true;
             }
             if !is_divider(&c) {
@@ -355,7 +366,7 @@ fn render_module_md(
 }
 
 /// 扫描全部 api 目录生成文档，返回生成的文件清单。
-/// out_dir=None 时默认 .bgd/doc/api_generated/。
+/// out_dir=None 时用配置 cfg.api_generated_dir（相对项目根）。
 pub fn generate_api_docs(
     bgd_root: &Path,
     cfg: &BgdConfig,
@@ -365,7 +376,7 @@ pub fn generate_api_docs(
     let out_root = match out_dir {
         Some(p) if p.is_absolute() => p.to_path_buf(),
         Some(p) => bgd_root.join(p),
-        None => bgd_root.join("doc").join("api_generated"),
+        None => cfg.abs(bgd_root, &cfg.api_generated_dir),
     };
     if out_root.is_dir() {
         fs::remove_dir_all(&out_root)?;
@@ -411,9 +422,9 @@ pub fn generate_api_docs(
                     .to_string_lossy()
                     .into_owned();
                 let api_rel = format!("{root_prefix}/{side}/api/{module}.lua");
-                let mut main_doc = parse_lua(&api_file, false)?;
+                let mut main_doc = parse_lua(&api_file, false, &cfg.doc_skip_annotation)?;
 
-                // @bgd:no-doc 标记：内部件不进文档
+                // 跳过标记命中：内部件不进文档
                 if main_doc.no_doc {
                     log(&format!("[skip] no-doc: {api_rel}"));
                     continue;
@@ -423,7 +434,7 @@ pub fn generate_api_docs(
                 // 纯转发：顺链解析目标 main + 同目录 *.d.lua
                 if let Some(req) = main_doc.forward.clone() {
                     if let Some(target) = resolve_require(&root_prefix, &src_root, &req) {
-                        let mut tdoc = parse_lua(&target, false)?;
+                        let mut tdoc = parse_lua(&target, false, &cfg.doc_skip_annotation)?;
                         // 头部与成员：转发文件自身有头则用转发文件的，否则用目标的
                         if main_doc.header.is_empty() {
                             main_doc.header = tdoc.header.clone();
@@ -445,7 +456,7 @@ pub fn generate_api_docs(
                                     .unwrap_or_default()
                                     .to_string_lossy()
                                     .into_owned();
-                                d_sigs.push((name, parse_lua(&dl, true)?));
+                                d_sigs.push((name, parse_lua(&dl, true, &cfg.doc_skip_annotation)?));
                             }
                         }
                     }

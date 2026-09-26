@@ -94,6 +94,7 @@ bgd_default.json            # 工具内建默认配置唯一来源（exe 内嵌 
 - **路径规则单一来源（rules.rs）**：res 资源规则（内建默认 + `res_rules` 按 res_type 稀疏覆盖，未知 res_type = 新增自定义类型，设置界面可加/删行）同时驱动 rewrite.rs 引用替换、res.rs 物理同步/清理、`path_rules.lua` 盖戳（dbg_bus/dbg_server eval 源码形态直通用，生成到 `.bgd/src/common/path_rules.lua`——common 目录双端共享，含 modules（客户端根名）与 modules_server（服务端根名）两段对照）；源码前缀（`libs`/`src`）从 `libs_dir`/`game_dir` 目录名派生，不写死。
 - **替换排除（rewrite_excludes）**：相对项目根的完整路径（不含扩展名），命中文件或目录则正常进产物但跳过模块名/res 替换；单条内 `|` 分隔多个；默认含 `.bgd/src/common/path_rules`（盖戳保护，设置中可见可删，删除即失去保护）。
 - **行级注解跳过（rewrite_skip_annotation）**：某行含注解文本（默认 `-- @bgd:no-rewrite`）时其下一行跳过全部替换（require + res，entrance 管线同样生效）；空串禁用。
+- **API 文档配置（api_generated_dir / doc_skip_annotation）**：输出路径默认 `.bgd/doc/api_generated`（build 自动刷新、clean 连带清除）；跳过标记默认 `-- @bgd:no-api_generated`（api 模块头部注释含此文本则不进文档，调试内部件用）；两者均为 bgd.json 可覆盖配置，设置界面可改。
 - **配置热更新**：watch 线程每轮（≤300ms）轮询 bgd.json mtime，变化即热重读替换配置快照（不重启监听），并补调盖戳重生成；历史产物不追溯，全量构建后完全生效。
 - **三路哈希增量更新**：基准存 `.bgd/.framework_state.json`；冲突时本地保留 + 新版另存 `.framework-new`。文本文件统一 LF 后哈希（防 CRLF 误报）。
 - **监听去重**：同一文件 300ms 窗口聚合一次处理（防编辑器原子保存产生重复日志）。

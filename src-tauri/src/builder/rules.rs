@@ -66,6 +66,20 @@ pub fn default_rules() -> Vec<ResRule> {
             disk_prefix: "ui/image/sprites/{prefix}".into(),
             runtime_prefix: "@{project}/image/sprites/{prefix}/".into(),
         },
+        ResRule {
+            res_type: "render".into(),
+            expect_ext: ".xml".into(),
+            strip_ext_in_ref: false,
+            disk_prefix: "res/render/{prefix}".into(),
+            runtime_prefix: "res/renderpaths/{prefix}/".into(),
+        },
+        ResRule {
+            res_type: "video".into(),
+            expect_ext: ".mp4".into(),
+            strip_ext_in_ref: false,
+            disk_prefix: "res/video/{prefix}".into(),
+            runtime_prefix: "res/video/{prefix}/".into(),
+        },
     ]
 }
 

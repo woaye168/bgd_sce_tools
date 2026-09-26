@@ -25,5 +25,7 @@
     ".bgd/src/common/path_rules"
   ],
   "rewrite_skip_annotation": "-- @bgd:no-rewrite",
+  "api_generated_dir": ".bgd/doc/api_generated",
+  "doc_skip_annotation": "-- @bgd:no-api_generated",
   "res_rules": []
 }

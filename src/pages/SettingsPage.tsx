@@ -287,6 +287,8 @@ export default function SettingsPage() {
           {textField("服务端入口", "server_entrance")}
           {textField("客户端入口", "client_entrance")}
           {textField("行级跳过注解", "rewrite_skip_annotation", "某行含此文本时其下一行跳过全部替换（留空禁用）")}
+          {textField("API文档生成路径", "api_generated_dir", "相对项目根；build 自动生成、clean 连带清除")}
+          {textField("API文档跳过标记", "doc_skip_annotation", "api 模块头部注释含此文本时不进生成文档（留空禁用）")}
         </div>
 
         {/* 替换排除（rewrite_excludes）：正常进构建产物但跳过模块名/res 路径替换；一行一条 */}

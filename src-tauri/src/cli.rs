@@ -210,6 +210,8 @@ fn set_config_field(cfg: &mut BgdConfig, key: &str, value: &str) -> Result<()> {
         "game_excludes" => cfg.game_excludes = parse_list(value)?,
         "rewrite_excludes" => cfg.rewrite_excludes = parse_list(value)?,
         "rewrite_skip_annotation" => cfg.rewrite_skip_annotation = value.to_string(),
+        "api_generated_dir" => cfg.api_generated_dir = value.to_string(),
+        "doc_skip_annotation" => cfg.doc_skip_annotation = value.to_string(),
         "res_rules" => {
             cfg.res_rules = serde_json::from_str(value)
                 .with_context(|| format!("res_rules 需用 JSON 数组格式（对象含 res_type 等字段）: {value}"))?

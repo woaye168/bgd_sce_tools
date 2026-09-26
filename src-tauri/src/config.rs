@@ -77,6 +77,15 @@ pub struct BgdConfig {
     #[serde(default)]
     pub rewrite_skip_annotation: String,
 
+    /// API 文档生成路径（相对项目根；build 自动生成、doc 子命令默认输出、clean 连带清除）
+    #[serde(default)]
+    pub api_generated_dir: String,
+
+    /// API 文档跳过标记：api 模块头部注释含此文本时，该模块不进生成文档
+    /// （调试框架内部件用，如 dbg_bus）。空串 = 禁用。
+    #[serde(default)]
+    pub doc_skip_annotation: String,
+
     /// 资源路径规则覆盖（0.9.0）：按 res_type 稀疏覆盖内建默认，只列差异字段；
     /// 缺省 = 全部用内建默认（工具升级新规则默认值自动生效）
     #[serde(default)]
