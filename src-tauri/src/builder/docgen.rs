@@ -93,10 +93,8 @@ fn parse_member_line(line: &str) -> Option<(String, String, String)> {
     Some((tab.to_string(), name.to_string(), t.to_string()))
 }
 
-/// 解析 return require('...')（纯转发检测用）
-fn parse_forward(line: &str) -> Option<String> {
-    let t = line.trim();
-    let rest = t.strip_prefix("return")?.trim_start();
+/// 从一行中提取 require 路径（剥到引号内为止）
+fn extract_require(rest: &str) -> Option<String> {
     let rest = rest.strip_prefix("require")?.trim_start();
     let rest = rest.strip_prefix('(')?.trim_start();
     let quote = rest.chars().next()?;
@@ -105,6 +103,26 @@ fn parse_forward(line: &str) -> Option<String> {
     }
     let end = rest[1..].find(quote)?;
     Some(rest[1..1 + end].to_string())
+}
+
+/// 纯转发判定：一行形态的 `return require('...')`
+fn parse_forward(line: &str) -> Option<String> {
+    let t = line.trim();
+    let rest = t.strip_prefix("return")?.trim_start();
+    extract_require(rest)
+}
+
+/// 转发模块表判定：两行形态的 `local M = require('...')`（后续 `return M`）
+fn parse_forward_require_local(line: &str) -> Option<(String, String)> {
+    let t = line.trim();
+    let rest = t.strip_prefix("local")?.trim_start();
+    let eq = rest.find('=')?;
+    let var = rest[..eq].trim();
+    if var.is_empty() || !var.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return None;
+    }
+    let req = extract_require(rest[eq + 1..].trim_start())?;
+    Some((var.to_string(), req))
 }
 
 /// 跳过标记命中判定：注释文本 c 与配置标记 skip 都剥掉 "--" 前缀后包含匹配
@@ -166,6 +184,8 @@ fn parse_lua(path: &Path, keep_annotations: bool, skip_annotation: &str) -> Resu
     let mut pending: Vec<String> = Vec::new();
     let mut code_lines = 0usize;
     let mut forward: Option<String> = None;
+    let mut forward_local: Option<(String, String)> = None; // (变量名, require 路径)
+    let mut return_vars: Vec<String> = Vec::new();
     for line in lines {
         let t = line.trim();
         if t.is_empty() {
@@ -184,6 +204,12 @@ fn parse_lua(path: &Path, keep_annotations: bool, skip_annotation: &str) -> Resu
         code_lines += 1;
         if let Some(f) = parse_forward(line) {
             forward = Some(f);
+        } else if let Some(fl) = parse_forward_require_local(line) {
+            forward_local = Some(fl);
+        } else if let Some(var) = t.strip_prefix("return").map(|r| r.trim()) {
+            if !var.is_empty() && var.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                return_vars.push(var.to_string());
+            }
         }
         if let Some((tab, name, sig)) = parse_member_line(line) {
             doc.members.push(MemberDoc {
@@ -196,8 +222,20 @@ fn parse_lua(path: &Path, keep_annotations: bool, skip_annotation: &str) -> Resu
             pending.clear();
         }
     }
-    // 纯转发：全文只有一个代码行且是 return require
-    doc.forward = if code_lines == 1 { forward } else { None };
+    // 顺链判定（三种形态统一）：
+    //   纯转发一行：`return require('...')`（唯一代码行）
+    //   纯转发两行：`local M = require('...')` + `return M`（无自有成员）
+    //   混合式：`local M = require('...')` + 自有 M.成员 + `return M`（顺链 + 自有成员合并覆盖）
+    // 关键区别：混合式的 doc.members 非空（自有增量/覆写），顺链目标作基底合并
+    let fwd = if code_lines == 1 {
+        forward
+    } else {
+        match (&forward_local, return_vars.as_slice()) {
+            (Some((var, req)), [rv]) if rv == var => Some(req.clone()),
+            _ => None,
+        }
+    };
+    doc.forward = fwd;
     doc.no_doc = doc.no_doc || no_doc;
     Ok(doc)
 }
@@ -230,6 +268,34 @@ fn cell(s: &str) -> String {
     s.replace('|', "\\|")
 }
 
+/// fun(...) 类型提取签名尾参（） 形参：fun 的类型串以括号收尾时，
+/// 尾参说明 = 闭括号之后的内容 + 下一个字段的类型名（无法与类型串区分，并入说明）。
+/// 例：`fun(rows: any[][]|nil, err: string|nil) 结果回调` →
+///   (ty=`fun(rows: any[][]|nil, err: string|nil)`, desc=`结果回调`)
+fn split_fun_type(s: &str) -> Option<(String, String)> {
+    // 找与 fun( 匹配的闭括号（允许嵌套括号）
+    let open = s.find('(')?;
+    let mut depth = 0i32;
+    let mut close = None;
+    for (i, ch) in s.char_indices().skip(open) {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    close = Some(i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let close = close?;
+    let ty = s[..=close].to_string();
+    let desc = s[close + 1..].trim().to_string();
+    Some((ty, desc))
+}
+
 /// 成员文档结构化渲染：
 /// 叙述行直出；@param/@return 归集成表格；其余 @注解（@class/@field 等）并入叙述。
 fn render_member_doc(doc: &[String]) -> String {
@@ -241,16 +307,24 @@ fn render_member_doc(doc: &[String]) -> String {
         let t = line.trim();
         if let Some(rest) = t.strip_prefix("@param") {
             let rest = rest.trim_start();
-            // 形态：name[?] type 说明…（type 可能含空格如 '"a"'|'"b"'，说明可缺省）
+            // 形态：name[?] type 说明…（type 可能含空格如 fun(...) 签名，说明可缺省）
             let name_end = rest.find(char::is_whitespace).unwrap_or(rest.len());
             let name = &rest[..name_end];
             let after = rest[name_end..].trim_start();
-            // 类型与说明的切分：最后一个「空白 + 中文字符/大写字母开头的词」之前都算类型
-            // 简化：类型无空格则直接取首段，否则按已知注解形态尽量切
-            let (ty, desc) = split_type_desc(after);
+            // fun(...) 类型串含空格/竖线，按括号配平提取；否则按首空白切分
+            let (ty, desc) = if after.starts_with("fun(") {
+                split_fun_type(after).unwrap_or_else(|| (after.to_string(), String::new()))
+            } else {
+                split_type_desc(after)
+            };
             params.push((cell(name), cell(&ty), cell(&desc)));
         } else if let Some(rest) = t.strip_prefix("@return") {
-            let (ty, desc) = split_type_desc(rest.trim_start());
+            let after = rest.trim_start();
+            let (ty, desc) = if after.starts_with("fun(") {
+                split_fun_type(after).unwrap_or_else(|| (after.to_string(), String::new()))
+            } else {
+                split_type_desc(after)
+            };
             returns.push((cell(&ty), cell(&desc)));
         } else {
             narrative.push(line.as_str());
@@ -431,15 +505,29 @@ pub fn generate_api_docs(
                 }
                 let mut d_sigs: Vec<(String, LuaDoc)> = Vec::new();
 
-                // 纯转发：顺链解析目标 main + 同目录 *.d.lua
+                // 顺链（纯转发/混合式统一）：目标 main 成员作基底 + 同目录 *.d.lua；
+                // api 自有成员后合并（同名覆盖 = 与运行时覆写语义一致）
                 if let Some(req) = main_doc.forward.clone() {
                     if let Some(target) = resolve_require(&root_prefix, &src_root, &req) {
                         let mut tdoc = parse_lua(&target, false, &cfg.doc_skip_annotation)?;
-                        // 头部与成员：转发文件自身有头则用转发文件的，否则用目标的
+                        // 头部：转发文件自身有头则用转发文件的，否则用目标的
                         if main_doc.header.is_empty() {
                             main_doc.header = tdoc.header.clone();
                         }
-                        main_doc.members.append(&mut tdoc.members);
+                        // 成员合并：基底(main) + 自有(api) 同名覆盖
+                        let own = std::mem::take(&mut main_doc.members);
+                        main_doc.members = std::mem::take(&mut tdoc.members);
+                        for m in own {
+                            if let Some(base) = main_doc
+                                .members
+                                .iter_mut()
+                                .find(|b| b.table == m.table && b.name == m.name)
+                            {
+                                *base = m; // 覆写：api 自有成员覆盖 main 同名
+                            } else {
+                                main_doc.members.push(m); // 增量：api 新增成员
+                            }
+                        }
                         if let Some(dir) = target.parent() {
                             let mut dls: Vec<PathBuf> = fs::read_dir(dir)?
                                 .filter_map(|e| e.ok().map(|e| e.path()))
@@ -510,4 +598,68 @@ pub fn generate_api_docs(
     generated.push(idx_path);
     log(&format!("[ok] api 文档生成完成: {} 个模块", index.len()));
     Ok(generated)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 混合式：api = 转发 + 自有增量 + 同名覆写 → main 基底 + 自有合并覆盖
+    #[test]
+    fn mixed_forward_merges_with_override() {
+        let tmp = std::env::temp_dir().join("bgd_docgen_mix_test");
+        let _ = fs::remove_dir_all(&tmp);
+        let api_dir = tmp.join("libs/server/api");
+        let mod_dir = tmp.join("libs/server/modules/mixmod");
+        fs::create_dir_all(&api_dir).unwrap();
+        fs::create_dir_all(&mod_dir).unwrap();
+        fs::write(
+            mod_dir.join("main.lua"),
+            "-- main\nlocal M = {}\n---基础A\nfunction M.base_a() end\n---基础B\nfunction M.base_b() end\nreturn M\n",
+        )
+        .unwrap();
+        fs::write(
+            api_dir.join("mixmod.lua"),
+            "-- mix\nlocal M = require('libs.server.modules.mixmod.main')\n---自有C\nfunction M.own_c() end\n---覆写A\nfunction M.base_a() end\nreturn M\n",
+        )
+        .unwrap();
+
+        let mut api = parse_lua(&api_dir.join("mixmod.lua"), false, "").unwrap();
+        assert_eq!(
+            api.forward.as_deref(),
+            Some("libs.server.modules.mixmod.main"),
+            "混合式应识别顺链目标"
+        );
+        let tdoc = parse_lua(&mod_dir.join("main.lua"), false, "").unwrap();
+        // 复刻 generate 的合并逻辑
+        let own = std::mem::take(&mut api.members);
+        let mut merged = tdoc.members;
+        for m in own {
+            if let Some(b) = merged.iter_mut().find(|b| b.table == m.table && b.name == m.name) {
+                *b = m;
+            } else {
+                merged.push(m);
+            }
+        }
+        let names: Vec<&str> = merged.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(names, vec!["base_a", "base_b", "own_c"]);
+        // base_a 被 api 覆写（doc 第一行是 api 侧的「覆写A」）
+        let base_a = merged.iter().find(|m| m.name == "base_a").unwrap();
+        assert_eq!(base_a.doc.first().map(|s| s.as_str()), Some("覆写A"));
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// 纯转发两行：local M = require + return M（无自有成员）
+    #[test]
+    fn plain_forward_two_lines() {
+        let tmp = std::env::temp_dir().join("bgd_docgen_fwd_test");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        let f = tmp.join("x.lua");
+        fs::write(&f, "-- x\nlocal M = require('libs.a.b.main')\nreturn M\n").unwrap();
+        let d = parse_lua(&f, false, "").unwrap();
+        assert_eq!(d.forward.as_deref(), Some("libs.a.b.main"));
+        assert!(d.members.is_empty());
+        let _ = fs::remove_dir_all(&tmp);
+    }
 }
