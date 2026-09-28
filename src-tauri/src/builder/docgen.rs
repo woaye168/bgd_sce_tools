@@ -337,6 +337,54 @@ fn cell(s: &str) -> String {
     s.replace('|', "\\|")
 }
 
+/// 头部说明里的代码行识别（保守：明显是 Lua 语句的行才算，误包中文说明的代价是
+/// 说明变代码块——可以接受；漏包代码的代价是 VitePress/Vue 模板编译炸——不能接受）。
+/// 规则：含 `=` 赋值 / `local ` / `function` / `end` / 方法调用 `xxx.yyy(...)` 的行。
+fn is_lua_code_line(s: &str) -> bool {
+    let t = s.trim();
+    if t.is_empty() {
+        return false;
+    }
+    // 明显 Lua 特征
+    if t.starts_with("local ") || t.starts_with("function") || t == "end" || t == "end)" {
+        return true;
+    }
+    // 赋值（= 且左侧是标识符/成员链）或方法调用
+    if t.contains("=") && !t.starts_with("--") {
+        return true;
+    }
+    // xxx.yyy(...) 调用形态
+    if t.contains('.') && t.contains('(') && t.contains(')') {
+        return true;
+    }
+    false
+}
+
+/// 叙述文本里的裸 <word> 转义（防 Vue 当 HTML 标签；反引号/代码块内不动）
+/// 简单处理：< 后紧跟字母或 / 的，转义为 &lt;；> 对称转义。
+fn escape_angle_brackets(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let chars: Vec<char> = s.chars().collect();
+    let mut in_code = false; // 反引号开关（行内代码里的尖括号不动）
+    for (i, &c) in chars.iter().enumerate() {
+        if c == '`' {
+            in_code = !in_code;
+            out.push(c);
+            continue;
+        }
+        if in_code {
+            out.push(c);
+            continue;
+        }
+        if c == '<' && chars.get(i + 1).is_some_and(|&n| n.is_alphabetic() || n == '/') {
+            out.push_str("&lt;");
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 /// fun(...) 类型提取签名尾参（） 形参：fun 的类型串以括号收尾时，
 /// 尾参说明 = 闭括号之后的内容 + 下一个字段的类型名（无法与类型串区分，并入说明）。
 /// 例：`fun(rows: any[][]|nil, err: string|nil) 结果回调` →
@@ -410,7 +458,9 @@ fn render_member_doc(doc: &[String]) -> String {
     }
     if !narrative.is_empty() {
         for l in &narrative {
-            out.push_str(l);
+            // 叙述里的裸 <word> 会被 Vue 当 HTML 标签炸模板——转义尖括号
+            // （md 里反引号包裹的不动，只转义裸文本里的）
+            out.push_str(&escape_angle_brackets(l));
             out.push('\n');
         }
         out.push('\n');
@@ -463,9 +513,23 @@ fn render_module_md(
     out.push_str(&format!("> 来源：`{api_rel}`（{code_set}）\n\n"));
 
     if !main.header.is_empty() {
+        // 头部说明里的代码行包进 code block（VitePress/Vue 把 md 当 Vue 模板编译，
+        // 裸文本里的 {{ }} / <id> 会炸模板——代码必须进 fenced block）
+        let mut in_code = false;
         for l in &main.header {
+            let is_code = is_lua_code_line(l);
+            if is_code && !in_code {
+                out.push_str("```lua\n");
+                in_code = true;
+            } else if !is_code && in_code {
+                out.push_str("```\n\n");
+                in_code = false;
+            }
             out.push_str(l);
             out.push('\n');
+        }
+        if in_code {
+            out.push_str("```\n");
         }
         out.push('\n');
     } else {
