@@ -324,17 +324,85 @@ fn resolve_submodule_file(cur_file: &Path, req: &str) -> Option<PathBuf> {
 }
 
 /// 成员概览表里的首行说明（跳过空行取首行）
+/// 统一 Vue 安全转义（所有用户自由文本出口必须走这里）。
+/// 规则：
+/// - `{{` / `}}` → HTML 实体（Vue 插值表达式炸编译）
+/// - 单 `{` / `}` → HTML 实体（Vue 模板里属性位置也会解析）
+/// - `<` 后紧跟字母或 `/` → `&lt;`（防被当 HTML 标签；反引号/代码块内不动）
+/// - `|` → `\|`（表格分隔符）
+/// - 反引号奇数个时配平（防吞行）
+fn escape_vue_text(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 16);
+    let chars: Vec<char> = s.chars().collect();
+    let mut in_code = false;
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '`' {
+            in_code = !in_code;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if in_code {
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        // {{ 插值表达式 → HTML 实体
+        if c == '{' && chars.get(i + 1) == Some(&'{') {
+            out.push_str("&#123;&#123;");
+            i += 2;
+            continue;
+        }
+        if c == '}' && chars.get(i + 1) == Some(&'}') {
+            out.push_str("&#125;&#125;");
+            i += 2;
+            continue;
+        }
+        // 单 { } 也转义（Vue 模板属性位置会解析）
+        if c == '{' {
+            out.push_str("&#123;");
+            i += 1;
+            continue;
+        }
+        if c == '}' {
+            out.push_str("&#125;");
+            i += 1;
+            continue;
+        }
+        // 裸 <word> / </word> → &lt;
+        if c == '<' && chars.get(i + 1).is_some_and(|&n| n.is_alphabetic() || n == '/') {
+            out.push_str("&lt;");
+            i += 1;
+            continue;
+        }
+        // 表格分隔符
+        if c == '|' {
+            out.push_str("\\|");
+            i += 1;
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    // 反引号配平（奇数个时末尾补一个，防吞行）
+    if in_code {
+        out.push('`');
+    }
+    out
+}
+
 fn first_doc_line(doc: &[String]) -> String {
     doc.iter()
         .find(|s| !s.trim().is_empty())
         .cloned()
         .unwrap_or_default()
-        .replace('|', "\\|")
 }
 
-/// 单元格转义（| 会破坏表格）
+/// 单元格转义（统一走 escape_vue_text）
 fn cell(s: &str) -> String {
-    s.replace('|', "\\|")
+    escape_vue_text(s)
 }
 
 /// 头部说明里的代码行识别（保守：明显是 Lua 语句的行才算，误包中文说明的代价是
@@ -358,31 +426,6 @@ fn is_lua_code_line(s: &str) -> bool {
         return true;
     }
     false
-}
-
-/// 叙述文本里的裸 <word> 转义（防 Vue 当 HTML 标签；反引号/代码块内不动）
-/// 简单处理：< 后紧跟字母或 / 的，转义为 &lt;；> 对称转义。
-fn escape_angle_brackets(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let chars: Vec<char> = s.chars().collect();
-    let mut in_code = false; // 反引号开关（行内代码里的尖括号不动）
-    for (i, &c) in chars.iter().enumerate() {
-        if c == '`' {
-            in_code = !in_code;
-            out.push(c);
-            continue;
-        }
-        if in_code {
-            out.push(c);
-            continue;
-        }
-        if c == '<' && chars.get(i + 1).is_some_and(|&n| n.is_alphabetic() || n == '/') {
-            out.push_str("&lt;");
-        } else {
-            out.push(c);
-        }
-    }
-    out
 }
 
 /// fun(...) 类型提取签名尾参（） 形参：fun 的类型串以括号收尾时，
@@ -458,9 +501,7 @@ fn render_member_doc(doc: &[String]) -> String {
     }
     if !narrative.is_empty() {
         for l in &narrative {
-            // 叙述里的裸 <word> 会被 Vue 当 HTML 标签炸模板——转义尖括号
-            // （md 里反引号包裹的不动，只转义裸文本里的）
-            out.push_str(&escape_angle_brackets(l));
+            out.push_str(&escape_vue_text(l));
             out.push('\n');
         }
         out.push('\n');
@@ -525,7 +566,7 @@ fn render_module_md(
                 out.push_str("```\n\n");
                 in_code = false;
             }
-            out.push_str(l);
+            out.push_str(&escape_vue_text(l));
             out.push('\n');
         }
         if in_code {
@@ -543,7 +584,7 @@ fn render_module_md(
                 "| `{}.{}` | {} |\n",
                 m.table,
                 m.name,
-                first_doc_line(&m.doc)
+                cell(&first_doc_line(&m.doc))
             ));
         }
         out.push_str("\n## 成员详情\n\n");
@@ -706,7 +747,7 @@ pub fn generate_api_docs(
                     out_name.clone(),
                     side.to_string(),
                     module.clone(),
-                    first_doc_line(&main_doc.header),
+                    escape_vue_text(&first_doc_line(&main_doc.header)),
                 ));
                 generated.push(out);
             }
