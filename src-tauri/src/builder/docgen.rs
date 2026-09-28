@@ -19,6 +19,8 @@ struct MemberDoc {
     name: String,
     sig: String,
     doc: Vec<String>,
+    /// 跨模块转发绑定的源变量与源成员（`M.x = sub.y` → (sub, y)）；仅当 doc 为空时用于回溯取注释
+    bind: Option<(String, String)>,
 }
 
 /// 一个 lua 文件解析出的文档结构
@@ -61,8 +63,8 @@ fn keep_comment(s: &str, keep_annotations: bool) -> bool {
     true
 }
 
-/// 解析 function/M 绑定行，返回 (table, name, sig)
-fn parse_member_line(line: &str) -> Option<(String, String, String)> {
+/// 解析 function/M 绑定行，返回 (table, name, sig, bind)
+fn parse_member_line(line: &str) -> Option<(String, String, String, Option<(String, String)>)> {
     let t = line.trim();
     // function X.y(...) / function X:y(...)
     if let Some(rest) = t.strip_prefix("function") {
@@ -75,11 +77,12 @@ fn parse_member_line(line: &str) -> Option<(String, String, String)> {
         if tab.is_empty() || name.is_empty() {
             return None;
         }
-        return Some((tab, name, t.to_string()));
+        return Some((tab, name, t.to_string(), None));
     }
     // X.y = ...（仅限 M 或大写开头表，排除 core.xxx/override.xxx 等内部注入）
     let eq = t.find('=')?;
     let lhs = t[..eq].trim();
+    let rhs = t[eq + 1..].trim();
     let (tab, name) = lhs
         .rsplit_once('.')
         .map(|(a, b)| (a.to_string(), b.to_string()))?;
@@ -90,7 +93,17 @@ fn parse_member_line(line: &str) -> Option<(String, String, String)> {
     if !ok_table {
         return None;
     }
-    Some((tab.to_string(), name.to_string(), t.to_string()))
+    // 右值是另一变量的成员引用（`sub.y`，无调用无表构造）→ 记录转发绑定源
+    let bind = rhs
+        .split_once('.')
+        .filter(|(var, member)| {
+            !var.is_empty()
+                && var.chars().all(|c| c.is_alphanumeric() || c == '_')
+                && !member.is_empty()
+                && member.chars().all(|c| c.is_alphanumeric() || c == '_')
+        })
+        .map(|(var, member)| (var.to_string(), member.to_string()));
+    Some((tab, name, t.to_string(), bind))
 }
 
 /// 从一行中提取 require 路径（剥到引号内为止）
@@ -186,6 +199,8 @@ fn parse_lua(path: &Path, keep_annotations: bool, skip_annotation: &str) -> Resu
     let mut forward: Option<String> = None;
     let mut forward_local: Option<(String, String)> = None; // (变量名, require 路径)
     let mut return_vars: Vec<String> = Vec::new();
+    // require 局部变量 → 模块路径（供 M.x = sub.y 的 bind 回溯定位子模块文件）
+    let mut require_vars: Vec<(String, String)> = Vec::new();
     for line in lines {
         let t = line.trim();
         if t.is_empty() {
@@ -205,21 +220,54 @@ fn parse_lua(path: &Path, keep_annotations: bool, skip_annotation: &str) -> Resu
         if let Some(f) = parse_forward(line) {
             forward = Some(f);
         } else if let Some(fl) = parse_forward_require_local(line) {
-            forward_local = Some(fl);
+            forward_local = Some(fl.clone());
+            require_vars.push(fl);
         } else if let Some(var) = t.strip_prefix("return").map(|r| r.trim()) {
             if !var.is_empty() && var.chars().all(|c| c.is_alphanumeric() || c == '_') {
                 return_vars.push(var.to_string());
             }
         }
-        if let Some((tab, name, sig)) = parse_member_line(line) {
+        if let Some((tab, name, sig, bind)) = parse_member_line(line) {
             doc.members.push(MemberDoc {
                 table: tab,
                 name,
                 sig,
                 doc: std::mem::take(&mut pending),
+                bind,
             });
         } else {
             pending.clear();
+        }
+    }
+    // bind 回溯：成员的 doc 为空且 bind 源变量是 require 的子模块 → 追到子模块取注释
+    if !require_vars.is_empty() {
+        for m in doc.members.iter_mut() {
+            // bind 成员自身注释无效时才回溯：空，或单行且等于源变量名（分类注释如 "-- array"）
+            let own_useless = match m.doc.as_slice() {
+                [] => true,
+                [single] => single.trim().eq_ignore_ascii_case(
+                    m.bind.as_ref().map(|(v, _)| v.as_str()).unwrap_or(""),
+                ),
+                _ => false,
+            };
+            if !own_useless {
+                continue;
+            }
+            let Some((var, member)) = &m.bind else { continue };
+            let Some((_, req)) = require_vars.iter().find(|(v, _)| v == var) else {
+                continue;
+            };
+            // 只回溯一跳：require 路径解析为文件，找其 M.<member> 的注释
+            let sub_path = resolve_submodule_file(path, req);
+            if let Some(sub_path) = sub_path {
+                if let Ok(sub_doc) = parse_lua(&sub_path, false, skip_annotation) {
+                    if let Some(sm) = sub_doc.members.iter().find(|sm| &sm.name == member) {
+                        if !sm.doc.is_empty() {
+                            m.doc = sm.doc.clone();
+                        }
+                    }
+                }
+            }
         }
     }
     // 顺链判定（三种形态统一）：
@@ -252,6 +300,27 @@ fn resolve_require(root_prefix: &str, src_root: &Path, req: &str) -> Option<Path
     }
     let p = src_root.join(rel.join("/")).with_extension("lua");
     p.is_file().then_some(p)
+}
+
+/// bind 回溯用的子模块定位：从当前文件向上找 code set 根（含 libs/src 前缀的父目录），
+/// 再把 require 路径解析成实际文件。当前文件在 <code_set>/<...>/<file>.lua，
+/// require 首段是 libs/src 根名 → 上溯到 code set 目录后拼接剩余段。
+fn resolve_submodule_file(cur_file: &Path, req: &str) -> Option<PathBuf> {
+    let mut segs: Vec<&str> = req.split('.').collect();
+    if segs.len() < 2 {
+        return None;
+    }
+    let root_prefix = segs.remove(0); // libs / src
+    // 从当前文件向上找名为 root_prefix 的祖先目录（code set 根）
+    let mut dir = cur_file.parent();
+    while let Some(d) = dir {
+        if d.file_name().and_then(|n| n.to_str()) == Some(root_prefix) {
+            let p = d.join(segs.join("/")).with_extension("lua");
+            return p.is_file().then_some(p);
+        }
+        dir = d.parent();
+    }
+    None
 }
 
 /// 成员概览表里的首行说明（跳过空行取首行）
