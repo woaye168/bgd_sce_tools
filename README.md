@@ -217,6 +217,73 @@ git push origin v0.1.4
 11. **行级注解跳过（rewrite_skip_annotation）**：某行含注解文本（默认 `-- @bgd:no-rewrite`）时其**下一行**跳过全部替换（require 改写 + res 替换，entrance 管线同样生效）；注解文本可配置，留空禁用
 12. **配置热更新**：监听（watch）运行期间修改 bgd.json 即时生效（mtime 轮询热重读，不重启监听）；path_rules 盖戳随 res_rules 变更自动重生成；历史产物不追溯，全量构建后完全生效
 
+## 凭证体系与重建手册
+
+本节记录本生态全部凭证的存放位置、鉴权链路，以及「凭证泄露/失效后完整重建」的标准流程（2026-10-08 实战定稿）。
+
+### 凭证全景
+
+| 凭证 | 形态 | 存放位置 | 用途 | 吊销入口 |
+| --- | --- | --- | --- | --- |
+| bgd_sce_tools 的 PAT | fine-grained PAT（`github_pat_`） | Windows 凭据管理器条目 `bgd_sce_tools/github_token`（keyring，不落盘） | 框架下载/更新、应用市场、自我更新（全程 HTTP API + `Authorization: Bearer` 头，**不走 git 协议**） | GitHub → Settings → Developer settings → Personal access tokens → **Fine-grained tokens** |
+| gh CLI 的 OAuth token | OAuth（`gho_`） | Windows 凭据管理器条目 `gh:github.com:*` | 日常 git push/pull、gh 命令 | GitHub → Settings → Applications → Authorized OAuth Apps → GitHub CLI → Revoke（或本机 `gh auth logout`） |
+| Git Credential Manager 条目 | 缓存的 git 凭据 | 凭据管理器条目 `git:https://github.com` 等 | 未走 gh helper 的仓库的 git 认证 | 本机 `cmdkey /delete:"<条目名>"` |
+
+**鉴权架构要点**：bgd_sce_tools 的私有库访问从设计之初就绑定 HTTP Bearer 头（见 `src-tauri/src/net.rs`），与 git 配置、git 协议**完全无关**；应用源码依赖全走 crates.io（无 git 依赖）。因此重建 PAT 只影响本工具的 GitHub 链路，不影响任何项目的 cargo 构建。
+
+### 已知坑：git 全局 url.insteadOf 内嵌 token（已清除）
+
+历史上（sce_app_editor-patch 0.6.3 方案时期）曾在全局 `.gitconfig` 配置过：
+
+```ini
+[url "https://x-access-token:<PAT>@github.com/"]
+    insteadOf = https://github.com/
+```
+
+**危害**：所有 `https://github.com/` 的 git 操作被强制塞入该 PAT——新仓库不在其授权范围时 403 `Write access not granted`，且凭据链排查极具迷惑性（gh 凭据正确也照样 403）。该方案已被 0.6.7（crates.io 依赖）取代，规则已于 2026-10-08 删除。**禁止再次使用此方式**；git 认证统一走 gh（`gh auth setup-git`）或 GCM。
+
+排查命令：`git config --global --list | findstr /i insteadof`（无输出即正常）。
+
+### 完整重建流程（凭证泄露或怀疑泄露时）
+
+**第一步：GitHub 网页端吊销**
+
+1. https://github.com/settings/personal-access-tokens → 吊销全部可疑 fine-grained PAT（列表只显示自定义名称，按 Last used 时间辨认；重建场景建议全部吊销）
+2. （如需连 gh 一起重置）Settings → Applications → Authorized OAuth Apps → GitHub CLI → Revoke
+
+**第二步：验证吊销生效**
+
+```bash
+curl -s -o NUL -w "%{http_code}" -H "Authorization: Bearer <旧PAT>" https://api.github.com/user
+# 401 = 已失效；200 = 仍有效（没删干净）
+```
+
+**第三步：本机清理残留凭据**
+
+```bash
+cmdkey /list | findstr /i github        # 列出全部 github 相关条目
+cmdkey /delete:"git:https://x-access-token@github.com"   # 内嵌 token 时代残留，必删
+cmdkey /delete:"git:https://github.com"                  # GCM 缓存，删后下次 push 自动重登
+# gh:github.com:* 条目是 gh 自己的 token，若第一步没吊销 OAuth 则保留
+git config --global --list | findstr /i insteadof        # 确认无 URL 重写残留
+```
+
+**第四步：重新签发**
+
+1. 新建 fine-grained PAT：https://github.com/settings/personal-access-tokens → Generate new token
+   - Repository access：**Only select repositories**，勾选 `bgd_sce_tools` / `bgd_sce_framework` / `bgd_sce_appsdk` / `sce_app_*`（后续新增应用仓库同样要加）
+   - Permissions：只需 **Contents: Read-only**
+2. 填入工具：【设置】页 → GitHub Token → 保存（或 CLI：`bgd_sce_tools setting set github_token <PAT>`）
+3. （若吊销了 gh 的 OAuth）`gh auth login` 重新走浏览器授权
+
+**第五步：回归验证**
+
+```bash
+gh auth status                    # gh 登录态正常
+git ls-remote origin HEAD         # 在某个项目仓库内验证 git 推拉正常
+# 打开 bgd_sce_tools：检查框架更新 / 应用市场 / 关于页检查更新，确认私有库链路恢复
+```
+
 ## 许可证
 
 本项目采用 [GNU Affero General Public License v3.0](LICENSE) 开源。
